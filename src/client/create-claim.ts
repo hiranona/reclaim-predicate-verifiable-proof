@@ -92,6 +92,7 @@ async function _createClaimOnAttestor<N extends ProviderName>(
 		secretParams,
 		context,
 		onStep,
+		onClaimRequestPrepared,
 		ownerPrivateKey,
 		client: clientInit,
 		logger = LOGGER,
@@ -317,6 +318,7 @@ async function _createClaimOnAttestor<N extends ProviderName>(
 	const requestSignature = await signatureAlg
 		.sign(claimTunnelBytes, ownerPrivateKey)
 	claimTunnelReq.signatures = { requestSignature }
+	onClaimRequestPrepared?.(claimTunnelReq)
 
 	const result = await client!.rpc('claimTunnel', claimTunnelReq)
 
@@ -544,6 +546,7 @@ async function _createClaimOnAttestor<N extends ProviderName>(
 				)
 				if(updateParametersFromOprfData && toprfs) {
 					let strParams = canonicalStringify(params)
+					let strContext = canonicalStringify(context)
 					for(const toprf of toprfs) {
 						const ogText = uint8ArrayToStr(toprf.plaintext)
 						const hashedText = binaryHashToStr(
@@ -551,9 +554,15 @@ async function _createClaimOnAttestor<N extends ProviderName>(
 							toprf.dataLocation!.length
 						)
 						strParams = strParams.replaceAll(ogText, hashedText)
+						strContext = strContext?.replaceAll(ogText, hashedText)
+						strContext = strContext?.replaceAll(
+							JSON.stringify(ogText).slice(1, -1),
+							hashedText
+						)
 					}
 
 					params = JSON.parse(strParams)
+					context = strContext ? JSON.parse(strContext) : context
 				}
 
 			}

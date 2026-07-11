@@ -1,4 +1,4 @@
-import type { ProviderClaimData } from '#src/proto/api.ts'
+import type { ClaimTunnelRequest, ProviderClaimData } from '#src/proto/api.ts'
 import type { IAttestorClient, IAttestorClientInitParams } from '#src/types/client.ts'
 import type { CompleteTLSPacket, Logger } from '#src/types/general.ts'
 import type { ProofGenerationStep, ProviderName, ProviderParams, ProviderSecretParams } from '#src/types/providers.ts'
@@ -34,6 +34,12 @@ export type CreateClaimOnAttestorOpts<N extends ProviderName> = {
 	context?: { [key: string]: any }
 
 	onStep?(step: ProofGenerationStep): void
+	/**
+	 * Experimental hook for building third-party verification packages.
+	 * Called after the request signature is attached and before sending it to
+	 * the attestor. The normal claim response intentionally strips transcripts.
+	 */
+	onClaimRequestPrepared?(request: ClaimTunnelRequest): void
 	/**
 	 * Private key in hex format,
 	 * prefixed with '0x'

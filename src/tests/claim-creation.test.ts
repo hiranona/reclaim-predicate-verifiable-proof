@@ -1,18 +1,28 @@
 import assert from 'node:assert'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, it, mock } from 'node:test'
 
 import { type CipherSuite, type TLSProtocolVersion } from '@reclaimprotocol/tls'
-import type { ZKEngine } from '@reclaimprotocol/zk-symmetric-crypto'
+import type { OPRFOperator, ZKEngine } from '@reclaimprotocol/zk-symmetric-crypto'
 
 import type { AttestorClient } from '#src/client/index.ts'
 import { createClaimOnAttestor, getAttestorClientFromPool } from '#src/client/index.ts'
+import { EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS } from '#src/config/index.ts'
+import type { ExperimentalPredicateProof } from '#src/providers/http/experimental-predicate.ts'
+import {
+	buildExperimentalPredicateProofPackageFromClaimResponse,
+	verifyExperimentalPredicateProofPackage
+} from '#src/providers/http/experimental-predicate-package.ts'
+import { makeProfileAgeGte20ToyVerifier } from '#src/providers/http/experimental-predicate-verifier.ts'
+import type { ClaimTunnelRequest } from '#src/proto/api.ts'
 import { providers } from '#src/providers/index.ts'
 import { describeWithServer } from '#src/tests/describe-with-server.ts'
 import { verifyNoDirectRevealLeaks } from '#src/tests/utils.ts'
 import {
 	assertValidClaimSignatures,
 	AttestorError,
+	EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES,
 	uint8ArrayToStr,
 } from '#src/utils/index.ts'
 
@@ -202,6 +212,123 @@ describeWithServer('Claim Creation', opts => {
 
 			// transcript is stripped from response to reduce wire size
 			// OPRF cross-packet validation is done server-side
+		})
+
+		it('should create a claim with an experimental predicate proof bound to OPRF', async() => {
+			const user = 'adhiraj'
+			const hiddenResponseSegment = `"emailAddress":"${user}@mock.com"`
+			const proof = buildExperimentalPredicateProof({
+				hiddenValueBinding: hiddenResponseSegment,
+				responseSelector: '$.emailAddress',
+			})
+			let verifierCalled = false
+			const oprfOperator = makeTestOprfOperator()
+			const verifier = makeProfileAgeGte20ToyVerifier(
+				'claim-creation-test-template',
+				'$.emailAddress'
+			)
+			assert.equal(verifier.circuitHash, proof.publicInput.circuitHash)
+			EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS.set(
+				verifier.circuitHash,
+				received => {
+					verifierCalled = true
+					assert.equal(received.providerTemplateHash, proof.providerTemplateHash)
+					assert.equal(received.responseSelector, proof.responseSelector)
+					assert.notEqual(received.publicInput.hiddenValueBinding, hiddenResponseSegment)
+					assert.equal(received.publicInput.hiddenValueBinding.length, hiddenResponseSegment.length)
+					return verifier.verify(received)
+				}
+			)
+			EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES.chacha20 = oprfOperator
+			EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES['aes-128-ctr'] = oprfOperator
+			EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES['aes-256-ctr'] = oprfOperator
+
+			try {
+				let preparedRequest: ClaimTunnelRequest | undefined
+				const result = await createClaimOnAttestor({
+					name: 'http',
+					params: {
+						url: claimUrl,
+						method: 'GET',
+						responseRedactions: [
+							{
+								jsonPath: '$.emailAddress',
+								hash: 'oprf'
+							}
+						],
+						responseMatches: [
+							{
+								type: 'contains',
+								value: ''
+							}
+						]
+					},
+					secretParams: {
+						authorisationHeader: `Bearer ${user}`
+					},
+					context: {
+						experimentalPredicateProof: proof,
+					},
+					ownerPrivateKey: opts.privateKeyHex,
+					client,
+					zkEngine: 'stwo',
+					oprfOperators: {
+						chacha20: oprfOperator,
+						'aes-128-ctr': oprfOperator,
+						'aes-256-ctr': oprfOperator,
+					},
+					onClaimRequestPrepared(request) {
+						preparedRequest = request
+					},
+				})
+
+				assert.ok(!result.error)
+				assert.ok(result.claim)
+				assert.equal(verifierCalled, true)
+				const ctx = JSON.parse(result.claim.context)
+				assert.equal(ctx.experimentalPredicateProof, undefined)
+				assert.equal(ctx.hiddenPredicate.responseSelector, '$.emailAddress')
+				assert.deepEqual(ctx.hiddenPredicate.selectedField, {
+					selector: '$.emailAddress',
+					bindingKind: 'toprf-json-redaction',
+					boundSegmentEncoding: 'json-key-value-segment',
+				})
+				assert.equal(ctx.hiddenPredicate.predicateResult, true)
+				assert.equal(ctx.hiddenPredicate.transcriptBinding.kind, 'toprf')
+				assert.equal(ctx.hiddenPredicate.transcriptBinding.length, hiddenResponseSegment.length)
+				assert.equal(typeof ctx.hiddenPredicate.transcriptBinding.recordNumber, 'number')
+				assert.equal(typeof ctx.hiddenPredicate.transcriptBinding.packetOffset, 'number')
+				assert.equal(typeof ctx.hiddenPredicate.transcriptBinding.nullifierHash, 'string')
+				assert.equal(
+					ctx.hiddenPredicate.hiddenValueBindingHash,
+					ctx.hiddenPredicate.transcriptBinding.nullifierHash
+				)
+				assert.equal(ctx.hiddenPredicate.hiddenValueBinding, undefined)
+				assert.equal(ctx.hiddenPredicate.proofHash, hashCanonical(proof.proof))
+
+				const pkg = buildExperimentalPredicateProofPackageFromClaimResponse(
+					result,
+					proof.proof,
+					undefined,
+					preparedRequest?.transcript
+				)
+				const pkgResult = await verifyExperimentalPredicateProofPackage(pkg)
+				assert.equal(pkgResult.ok, true, pkgResult.errors.join('; '))
+				assert.equal(
+					pkg.reveal.attestorObservedTranscriptCommitment.responseSelector,
+					'$.emailAddress'
+				)
+				assert.equal(pkg.warning.independentThirdPartyVerification, true)
+				assert.equal(pkg.warning.missing.length, 0)
+				assert.ok(pkg.reveal.replayableRevealProof)
+			} finally {
+				EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS.delete(
+					proof.publicInput.circuitHash
+				)
+				delete EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES.chacha20
+				delete EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES['aes-128-ctr']
+				delete EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES['aes-256-ctr']
+			}
 		})
 
 		it('should produce the same hash for the same input', async() => {
@@ -450,3 +577,101 @@ describeWithServer('Claim Creation', opts => {
 		})
 	}
 })
+
+function buildExperimentalPredicateProof({
+	hiddenValueBinding,
+	responseSelector,
+}: {
+	hiddenValueBinding: string
+	responseSelector: string
+}): ExperimentalPredicateProof {
+	const proof: ExperimentalPredicateProof = {
+		version: 'tlsn-mpc-lab.profile-age-predicate.v1',
+		providerTemplateHash: 'claim-creation-test-template',
+		responseSelector,
+		predicate: {
+			kind: 'age_gte',
+			threshold: 20,
+		},
+		publicInput: {
+			providerTemplateHash: 'claim-creation-test-template',
+			responseSelector,
+			hiddenValueBinding,
+			circuitHash: '',
+			predicateResult: true,
+		},
+		proof: {
+			system: 'toy',
+			payload: { test: 'claim-creation' },
+		},
+	}
+	proof.publicInput.circuitHash = createHash('sha256')
+		.update(JSON.stringify({
+			version: proof.version,
+			providerTemplateHash: proof.providerTemplateHash,
+			responseSelector: proof.responseSelector,
+			predicate: proof.predicate,
+		}))
+		.digest('hex')
+
+	return proof
+}
+
+function hashCanonical(value: unknown) {
+	return createHash('sha256')
+		.update(JSON.stringify(sortCanonical(value)))
+		.digest('hex')
+}
+
+function sortCanonical(value: unknown): unknown {
+	if(value === null || typeof value !== 'object') {
+		return value
+	}
+	if(Array.isArray(value)) {
+		return value.map(sortCanonical)
+	}
+
+	return Object.fromEntries(
+		Object.keys(value)
+			.sort()
+			.map(key => [key, sortCanonical((value as Record<string, unknown>)[key])])
+	)
+}
+
+function makeTestOprfOperator(): OPRFOperator {
+	return {
+		async generateWitness() {
+			return new Uint8Array()
+		},
+		async groth16Prove() {
+			return { proof: new Uint8Array([1]) }
+		},
+		async groth16Verify() {
+			return true
+		},
+		async generateThresholdKeys() {
+			return {
+				publicKey: new Uint8Array(),
+				privateKey: new Uint8Array(),
+				shares: [],
+			}
+		},
+		async generateOPRFRequestData(data) {
+			return {
+				mask: new Uint8Array(),
+				maskedData: data,
+				secretElements: [],
+			}
+		},
+		async finaliseOPRF(_serverPublicKey, request) {
+			return request.maskedData
+		},
+		async evaluateOPRF(_serverPrivateKey, request) {
+			return {
+				evaluated: request,
+				c: new Uint8Array(),
+				r: new Uint8Array(),
+			}
+		},
+	}
+}

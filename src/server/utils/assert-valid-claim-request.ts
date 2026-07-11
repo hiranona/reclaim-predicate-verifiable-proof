@@ -8,6 +8,7 @@ import type {
 	ProviderClaimInfo
 } from '#src/proto/api.ts'
 import { ClaimTunnelRequest, TranscriptMessageSenderType } from '#src/proto/api.ts'
+import { PROVIDER_CTX } from '#src/config/index.ts'
 import { providers } from '#src/providers/index.ts'
 import { niceParseJsonObject } from '#src/server/utils/generics.ts'
 import { computeOPRFRaw } from '#src/server/utils/oprf-raw.ts'
@@ -16,6 +17,7 @@ import { assertValidateProviderParams } from '#src/server/utils/validation.ts'
 import type {
 	IDecryptedTranscript,
 	IDecryptedTranscriptMessage,
+	HiddenValueBinding,
 	Logger,
 	OPRFRawReplacement,
 	ProviderCtx,
@@ -108,7 +110,11 @@ export async function assertValidClaimRequest(
 		metadata,
 		data,
 		logger,
-		{ version: metadata.clientVersion },
+		{
+			...PROVIDER_CTX,
+			version: metadata.clientVersion,
+			hiddenValueBindings: receipt.hiddenValueBindings,
+		},
 		receipt.oprfRawReplacements
 	)
 	if(newData !== data) {
@@ -160,6 +166,11 @@ export async function assertValidProviderTranscript<T extends ProviderClaimInfo>
 
 	assertValidateProviderParams(providerName, params)
 
+	providerCtx = {
+		...providerCtx,
+		claimContext: ctx,
+	}
+
 	const rslt = await provider.assertValidProviderReceipt({
 		clientVersion: metadata.clientVersion,
 		receipt: applData,
@@ -173,6 +184,10 @@ export async function assertValidProviderTranscript<T extends ProviderClaimInfo>
 	const extractedParameters = rslt?.extractedParameters || {}
 	if(Object.keys(extractedParameters).length) {
 		ctx.extractedParameters = extractedParameters
+	}
+	if(rslt?.hiddenPredicate) {
+		ctx.hiddenPredicate = rslt.hiddenPredicate
+		delete ctx.experimentalPredicateProof
 	}
 
 	info.context = canonicalStringify(ctx) ?? ''
@@ -249,6 +264,7 @@ export async function decryptTranscript(
 
 	const overshotMap: { [pkt: number]: { data: Uint8Array } } = {}
 	const decryptedTranscript: IDecryptedTranscriptMessage[] = []
+	const hiddenValueBindings: HiddenValueBinding[] = []
 	const oprfRawReplacements: { originalText: string, nullifierText: string }[] = []
 	// Track pending oprf-raw markers that span multiple packets
 	// keyed by packet index that will receive the overshot data
@@ -295,6 +311,7 @@ export async function decryptTranscript(
 		transcript: decryptedTranscript,
 		hostname: hostname,
 		tlsVersion: tlsVersion,
+		hiddenValueBindings,
 		oprfRawReplacements: oprfRawReplacements.length ? oprfRawReplacements : undefined
 	}
 
@@ -358,6 +375,7 @@ export async function decryptTranscript(
 				}
 			)
 			plaintext = result.redactedPlaintext
+			hiddenValueBindings.push(...result.hiddenValueBindings)
 
 			// Handle pending oprf-raw data from previous packet (cross-block)
 			const pendingForThis = pendingOprfRaw[i]

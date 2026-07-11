@@ -40,6 +40,7 @@ import { ZKProofEngine } from '#src/proto/api.ts'
 import type {
 	ArraySlice,
 	CompleteTLSPacket,
+	HiddenValueBinding,
 	Logger,
 	OPRFOperators,
 	PrepareZKProofsBaseOpts,
@@ -451,6 +452,7 @@ export async function makeZkProofGenerator(
 
 	function getOprfOperatorForAlgorithm(algorithm: EncryptionAlgorithm) {
 		return oprfOperators?.[algorithm]
+			|| EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES[algorithm]
 			|| makeDefaultOPRFOperator(algorithm, zkEngine, logger)
 	}
 }
@@ -480,6 +482,7 @@ export async function verifyZkPacket(
 	ciphertext = new Uint8Array(getPureCiphertext(ciphertext, cipherSuite))
 	const realRedactedPlaintext
 		= new Uint8Array(ciphertext.length).fill(REDACTION_CHAR_CODE)
+	const hiddenValueBindings: HiddenValueBinding[] = []
 
 	const replacements = await Promise.all(toprfs.map(async(toprf, i) => {
 		try {
@@ -502,8 +505,9 @@ export async function verifyZkPacket(
 		}
 	}))
 
-	for(const { set, startIdx } of replacements) {
+	for(const { set, startIdx, binding } of replacements) {
 		realRedactedPlaintext.set(set, startIdx)
+		hiddenValueBindings.push(binding)
 	}
 
 	/**
@@ -517,7 +521,7 @@ export async function verifyZkPacket(
 		realRedactedPlaintext.set(toprfOvershotNullifier)
 	}
 
-	return { redactedPlaintext: realRedactedPlaintext, oprfRawMarkers }
+	return { redactedPlaintext: realRedactedPlaintext, oprfRawMarkers, hiddenValueBindings }
 
 	async function verifyZkProofPacket(
 		{
@@ -678,6 +682,13 @@ export async function verifyZkPacket(
 				nulliferStr.slice(0, locations[0].len)
 			),
 			startIdx: locations[0].pos + startIdx,
+			binding: {
+				kind: 'toprf' as const,
+				nullifierText: nulliferStr,
+				length: dataLocation.length,
+				recordNumber,
+				packetOffset: locations[0].pos + startIdx,
+			},
 		}
 	}
 
@@ -688,6 +699,7 @@ export async function verifyZkPacket(
 
 	function getOprfOperator() {
 		return oprfOperators?.[algorithm]
+			|| EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES[algorithm]
 			|| makeDefaultOPRFOperator(algorithm, zkEngine, logger)
 	}
 }
@@ -705,6 +717,10 @@ const zkEngines: {
 
 const oprfEngines: {
 	[z in ZKEngine]?: { [E in EncryptionAlgorithm]?: OPRFOperator }
+} = {}
+
+export const EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES: {
+	[E in EncryptionAlgorithm]?: OPRFOperator
 } = {}
 
 const operatorMakers: { [z in ZKEngine]?: (opts: MakeZKOperatorOpts<{}>) => ZKOperator } = {

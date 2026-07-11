@@ -63,10 +63,24 @@ export type IDecryptedTranscriptMessage = {
 	recordHeader: Uint8Array
 }
 
+export type HiddenValueBinding = {
+	kind: 'toprf'
+	nullifierText: string
+	length: number
+	recordNumber: number
+	packetOffset: number
+}
+
 export type IDecryptedTranscript = {
 	transcript: IDecryptedTranscriptMessage[]
 	tlsVersion: TLSProtocolVersion
 	hostname: string
+	/**
+	 * Hidden values proven by ZK/TOPRF reveals. Predicate proof verifiers use
+	 * these transcript-derived bindings instead of accepting client-chosen
+	 * witness commitments.
+	 */
+	hiddenValueBindings?: HiddenValueBinding[]
 	/**
 	 * oprf-raw replacements: original plaintext -> nullifier mappings
 	 * for server-side parameter replacement
