@@ -133,6 +133,46 @@ Accept / Reject
   whether Reclaim's existing TOPRF/ZK machinery can support hidden predicate
   statements plus third-party package verification.
 
+## Path To A Real Predicate Registry
+
+The included `age >= 20` verifier is a toy adapter. It demonstrates where a
+predicate verifier plugs into the Reclaim flow, but it is not the right
+distribution model for production predicates.
+
+A production design should look closer to the existing
+[Explore Providers](https://dev.reclaimprotocol.org/explore) / Reclaim
+[Provider](./docs/provider.md) model: a shared registry describes which claim
+template, response selector, predicate kind, and circuit artifact belong
+together. The client should not invent a private verifier for each claim.
+Instead, the client, attestor, and third-party verifier should all resolve the
+same registry entry.
+
+That registry entry should include at least:
+
+- provider/template identifier and version;
+- response selector and the expected bound segment encoding;
+- predicate schema, such as `age_gte` and allowed threshold parameters;
+- proof system and circuit hash;
+- verifying key or verifier artifact location;
+- public input schema and canonicalization rules;
+- registry signature, digest, or allowlist metadata so the artifact itself is
+  not client-controlled.
+
+In that model the flow becomes:
+
+```text
+Claim template / provider definition
+  -> registry entry
+  -> circuit + verifier artifact
+  -> client generates predicate proof
+  -> attestor verifies proof through the registry-selected verifier
+  -> third party resolves the same registry entry and verifies the package
+```
+
+This branch implements the binding and package-verification side of that shape.
+It does not yet implement the shared circuit registry or artifact distribution
+layer.
+
 ## Tests
 
 Targeted tests used while developing this branch:
@@ -142,4 +182,3 @@ npm run run:test-files -- --test src/tests/experimental-predicate.test.ts
 npm run run:test-files -- --test-name-pattern "experimental predicate" --test src/tests/claim-creation.test.ts
 npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
 ```
-

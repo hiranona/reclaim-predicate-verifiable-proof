@@ -128,6 +128,42 @@ Accept / Reject
 - このブランチは production API ではなく、Reclaim 既存の TOPRF/ZK 機構で hidden predicate
   statement と第三者検証 package が実現できるかを評価する proof-of-concept です。
 
+## 本物の Predicate Registry に向けた位置づけ
+
+今回入っている `age >= 20` verifier は toy adapter です。Reclaim の flow のどこに
+predicate verifier を差し込むかを示すためのもので、本番 predicate の配布モデルとしては不十分です。
+
+本番相当にするなら、既存の
+[Explore Providers](https://dev.reclaimprotocol.org/explore) / Reclaim
+[Provider](./docs/provider.md) に近い形が必要です。つまり、claim template、response selector、
+predicate kind、circuit artifact の対応を共用 registry が記述し、client が claim ごとに
+private verifier を勝手に作るのではなく、client、attestor、third-party verifier が同じ
+registry entry を解決する形です。
+
+その registry entry には少なくとも以下が必要です。
+
+- provider/template identifier と version;
+- response selector と expected bound segment encoding;
+- `age_gte` などの predicate schema と許可される threshold parameter;
+- proof system と circuit hash;
+- verifying key または verifier artifact の場所;
+- public input schema と canonicalization rule;
+- artifact 自体が client-controlled にならないための registry signature、digest、allowlist metadata。
+
+その場合の flow は次の形になります。
+
+```text
+Claim template / provider definition
+  -> registry entry
+  -> circuit + verifier artifact
+  -> client が predicate proof を生成
+  -> attestor が registry-selected verifier で proof を検証
+  -> third party が同じ registry entry を解決して package を検証
+```
+
+このブランチが実装しているのは、この構成のうち binding と package verification の部分です。
+共用 circuit registry や artifact distribution layer はまだ実装していません。
+
 ## テスト
 
 このブランチで主に確認した targeted tests:
@@ -137,4 +173,3 @@ npm run run:test-files -- --test src/tests/experimental-predicate.test.ts
 npm run run:test-files -- --test-name-pattern "experimental predicate" --test src/tests/claim-creation.test.ts
 npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
 ```
-
