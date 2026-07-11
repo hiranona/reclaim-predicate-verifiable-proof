@@ -3,6 +3,9 @@
 この fork は、Reclaim Attestor Core に「隠された値に対する述語証明」と
 「第三者検証用メタデータ」を追加する実験ブランチです。
 
+> この fork の `main` は、この実験の安定版ベースラインとして扱います。
+> upstream `reclaimprotocol/attestor-core` のクリーンな mirror ではありません。
+
 元の upstream README は [README-upstream.md](./README-upstream.md) に退避しています。
 英語版は [README.md](./README.md) です。
 
@@ -173,3 +176,8 @@ npm run run:test-files -- --test src/tests/experimental-predicate.test.ts
 npm run run:test-files -- --test-name-pattern "experimental predicate" --test src/tests/claim-creation.test.ts
 npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
 ```
+
+## ビルドに関する付記
+
+この実験向けの targeted tests は通っています。repository 全体の build は、このブランチとは
+無関係な upstream 側 AVS/generated contract の TypeScript issue の影響を受ける可能性があります。

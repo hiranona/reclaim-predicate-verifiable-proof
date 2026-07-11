@@ -3,6 +3,9 @@
 This fork is an experimental extension of Reclaim Attestor Core for hidden
 predicate proofs with third-party verification metadata.
 
+> This fork treats `main` as the stable baseline for this experiment, not as a
+> clean mirror of upstream `reclaimprotocol/attestor-core`.
+
 The upstream README is preserved as [README-upstream.md](./README-upstream.md).
 Japanese documentation is available in [README-ja.md](./README-ja.md).
 
@@ -182,3 +185,9 @@ npm run run:test-files -- --test src/tests/experimental-predicate.test.ts
 npm run run:test-files -- --test-name-pattern "experimental predicate" --test src/tests/claim-creation.test.ts
 npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
 ```
+
+## Build Note
+
+Targeted tests for this experiment pass. A full repository build may still be
+affected by upstream AVS/generated contract TypeScript issues unrelated to this
+branch.
