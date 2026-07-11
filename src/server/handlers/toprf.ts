@@ -2,7 +2,11 @@ import { getBytes } from 'ethers'
 
 import type { RPCHandler } from '#src/types/index.ts'
 import { getEnvVariable } from '#src/utils/env.ts'
-import { getEngineString, makeDefaultOPRFOperator } from '#src/utils/index.ts'
+import {
+	EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES,
+	getEngineString,
+	makeDefaultOPRFOperator
+} from '#src/utils/index.ts'
 
 export const toprf: RPCHandler<'toprf'> = async(
 	{ maskedData, engine },
@@ -18,7 +22,8 @@ export const toprf: RPCHandler<'toprf'> = async(
 	const PUBLIC_KEY = getBytes(PUBLIC_KEY_STR)
 
 	const engineStr = getEngineString(engine)
-	const operator = makeDefaultOPRFOperator('chacha20', engineStr, logger)
+	const operator = EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES.chacha20
+		|| makeDefaultOPRFOperator('chacha20', engineStr, logger)
 	const res = await operator.evaluateOPRF(PRIVATE_KEY, maskedData)
 
 	return { ...res, publicKeyShare: PUBLIC_KEY }

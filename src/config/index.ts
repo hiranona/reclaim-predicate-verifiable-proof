@@ -1,4 +1,8 @@
 import type { InitRequest } from '#src/proto/api.ts'
+import type {
+	ExperimentalPredicateProof,
+	ExperimentalPredicateProofVerifier
+} from '#src/providers/http/experimental-predicate.ts'
 import { AttestorVersion, ServiceSignatureType } from '#src/proto/api.ts'
 
 export const DEFAULT_ZK_CONCURRENCY = 10
@@ -36,7 +40,22 @@ export const DEFAULT_METADATA: InitRequest = {
 	auth: undefined
 }
 
-export const PROVIDER_CTX = { version: CURRENT_ATTESTOR_VERSION }
+export const EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS
+	= new Map<string, ExperimentalPredicateProofVerifier>()
+
+export const PROVIDER_CTX = {
+	version: CURRENT_ATTESTOR_VERSION,
+	experimentalPredicateProofVerifier: (proof: ExperimentalPredicateProof) => {
+		const verifier = EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS.get(
+			proof.publicInput.circuitHash
+		)
+		if(!verifier) {
+			return false
+		}
+
+		return verifier(proof)
+	}
+}
 
 export const PING_INTERVAL_MS = 10_000
 /**

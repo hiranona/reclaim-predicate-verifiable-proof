@@ -1,10 +1,16 @@
 import type { TLSConnectionOptions } from '@reclaimprotocol/tls'
 
 import type { AttestorVersion, ProviderClaimData } from '#src/proto/api.ts'
-import type { ArraySlice, Logger, RedactedOrHashedArraySlice } from '#src/types/general.ts'
+import type {
+	ArraySlice,
+	HiddenValueBinding,
+	Logger,
+	RedactedOrHashedArraySlice
+} from '#src/types/general.ts'
 import type { ProvidersConfig } from '#src/types/providers.gen.ts'
 import type { Awaitable } from '#src/types/signatures.ts'
 import type { Transcript } from '#src/types/tunnel.ts'
+import type { HiddenPredicateStatement } from '#src/providers/http/experimental-predicate.ts'
 
 export type AttestorData = {
 	id: string
@@ -35,6 +41,8 @@ export type ProviderField<Params, SecretParams, T> = T | ((params: Params, secre
 
 export type ProviderCtx = {
   version: AttestorVersion
+  claimContext?: Record<string, unknown>
+  hiddenValueBindings?: HiddenValueBinding[]
 }
 
 type GetResponseRedactionsOpts<P> = {
@@ -142,7 +150,10 @@ export interface Provider<
    * */
   assertValidProviderReceipt(
     opts: AssertValidProviderReceipt<Params>
-  ): Awaitable<{ extractedParameters: { [key: string]: string } } | undefined>
+  ): Awaitable<{
+    extractedParameters: { [key: string]: string }
+    hiddenPredicate?: HiddenPredicateStatement
+  } | undefined>
 }
 
 export type ProofGenerationStep =

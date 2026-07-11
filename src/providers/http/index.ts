@@ -4,6 +4,7 @@ import { encodeBase64 } from 'ethers'
 
 import { DEFAULT_HTTPS_PORT, RECLAIM_USER_AGENT } from '#src/config/index.ts'
 import { AttestorVersion } from '#src/proto/api.ts'
+import { assertExperimentalPredicateProof } from '#src/providers/http/experimental-predicate.ts'
 import {
 	buildHeaders,
 	convertResponsePosToAbsolutePos,
@@ -294,7 +295,7 @@ const HTTP_PROVIDER: Provider<'http'> = {
 
 		return redactions
 	},
-	assertValidProviderReceipt({ clientVersion, receipt, params: paramsAny, logger, ctx }) {
+	async assertValidProviderReceipt({ clientVersion, receipt, params: paramsAny, logger, ctx }) {
 		logTranscript()
 		let extractedParams: { [_: string]: string } = {}
 		const secretParams = ('secretParams' in paramsAny)
@@ -493,7 +494,9 @@ const HTTP_PROVIDER: Provider<'http'> = {
 
 		}
 
-		return { extractedParameters: extractedParams }
+		const hiddenPredicate = await assertExperimentalPredicateProof(params, ctx)
+
+		return { extractedParameters: extractedParams, hiddenPredicate }
 
 		function logTranscript() {
 			const clientMsgs = receipt.filter(s => s.sender === 'client').map(m => m.message)
