@@ -69,6 +69,8 @@ export type HiddenValueBinding = {
 	length: number
 	recordNumber: number
 	packetOffset: number
+	cipherSuite: string
+	ciphertextHash: string
 }
 
 export type IDecryptedTranscript = {

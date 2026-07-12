@@ -52,6 +52,201 @@ a real circuit verifier and verifier artifacts.
   - exposes `onClaimRequestPrepared` so callers can retain the transcript needed
     to build replayable third-party packages.
 
+## Usage: Role-Based Demo
+
+This demo shows the protocol shape by separating the origin HTTPS server,
+Reclaim proxy/attestor, client/prover, and third-party verifier into terminal
+commands.
+
+The example statement is:
+
+```text
+The JSON field $.age from https://localhost:9443/profile satisfies age >= 20.
+The raw age value is hidden from the signed claim context.
+```
+
+The demo response body is:
+
+```json
+{"name":"alice","age":25,"height":170}
+```
+
+The predicate verifier is a toy adapter. It demonstrates the binding points for
+a real range-proof verifier, circuit hash, verifying key, and registry entry,
+but it is not a production range-proof implementation.
+
+Run all commands in this section from this repository root:
+
+```bash
+cd reclaim-predicate-verifiable-proof
+```
+
+### Install Dependencies
+
+```bash
+npm ci
+```
+
+Use `NODE_ENV=test` for the commands below so the local demo keys in `.env.test`
+are loaded.
+
+### Role Map
+
+| Role | Command | Data boundary |
+| --- | --- | --- |
+| Origin HTTPS server | `npm run demo:predicate:fixture` | Serves the profile JSON at `/profile`. |
+| Proxy / Attestor | `npm run demo:predicate:attestor` | Verifies the Reclaim transcript, TOPRF/ZK reveal, hidden-value binding, and predicate proof before signing the claim. |
+| Client fetch step | `npm run demo:predicate:fetch` | Reads the origin profile JSON and writes the client-observed input file. |
+| Client / Prover | `npm run demo:predicate:client` | Reads the client-observed input file, fetches through the attestor, proves the hidden predicate, and writes a third-party package JSON file. |
+| Third-party verifier | `npm run demo:predicate:verify` | Reads the package JSON and verifies the attestor signature, claim binding, predicate proof hash, transcript binding, and replayable reveal binding. |
+
+### 1. Origin HTTPS Server
+
+Terminal 1:
+
+```bash
+NODE_ENV=test npm run demo:predicate:fixture -- --host localhost --port 9443 --age 25
+```
+
+This starts a local HTTPS fixture at:
+
+```text
+https://localhost:9443/profile
+```
+
+The selected field is `$.age`. The intended predicate is `age >= 20`.
+
+### 2. Proxy / Attestor
+
+Terminal 2:
+
+```bash
+NODE_ENV=test npm run demo:predicate:attestor -- \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --out-dir artifacts/experimental-predicate-demo/attestor
+```
+
+This starts a local Reclaim attestor at:
+
+```text
+ws://127.0.0.1:8001/ws
+```
+
+At startup it registers the demo predicate verifier for:
+
+```text
+template: experimental-predicate-demo-profile-v1
+selector: $.age
+predicate: age >= 20
+proof system: toy
+```
+
+It also writes attestor-side demo metadata to:
+
+```text
+artifacts/experimental-predicate-demo/attestor/attestor-metadata.json
+```
+
+In a production design this verifier registration should be replaced by a
+shared predicate registry that maps provider template, selector, predicate
+schema, circuit hash, and verifier artifact.
+
+### 3a. Client Fetch Step
+
+Terminal 3:
+
+```bash
+NODE_ENV=test npm run demo:predicate:fetch -- \
+  --fixture-url https://localhost:9443/profile \
+  --out-file artifacts/experimental-predicate-demo/client/client-observed-profile.json
+```
+
+This is the client-side "curl-like" step. It writes the profile body that the
+client will use as predicate witness input:
+
+```text
+artifacts/experimental-predicate-demo/client/client-observed-profile.json
+```
+
+For tamper checks, edit this file before running 3b. For example, changing
+`"age": 25` to `"age": 15` makes proof generation fail locally. Changing it to
+another value such as `99` makes the later attestor binding fail because the
+predicate proof no longer matches the TOPRF hidden value observed through the
+Reclaim transcript.
+
+### 3b. Client / Prover
+
+Terminal 3:
+
+```bash
+NODE_ENV=test npm run demo:predicate:client -- \
+  --fixture-url https://localhost:9443/profile \
+  --attestor-url ws://127.0.0.1:8001/ws \
+  --profile-file artifacts/experimental-predicate-demo/client/client-observed-profile.json \
+  --out-dir artifacts/experimental-predicate-demo/client
+```
+
+The client/prover does the following:
+
+- reads `client-observed-profile.json` and builds the toy `age >= 20`
+  predicate proof input;
+- fetches the fixture URL through the Reclaim attestor;
+- marks `$.age` as `responseRedactions: [{ jsonPath: "$.age", hash: "oprf" }]`;
+- attaches `experimentalPredicateProof` to the claim context;
+- captures the prepared `ClaimTunnelRequest.transcript`;
+- receives the signed Reclaim claim from the attestor;
+- writes a third-party package to:
+
+```text
+artifacts/experimental-predicate-demo/client/predicate-package.json
+```
+
+The signed claim context contains `hiddenPredicate`. It does not contain the raw
+hidden age value.
+
+### 4. Third-Party Verifier
+
+Terminal 4:
+
+```bash
+NODE_ENV=test npm run demo:predicate:verify -- \
+  --package artifacts/experimental-predicate-demo/client/predicate-package.json
+```
+
+The verifier reads only the package file and checks:
+
+- attestor claim signature;
+- attestor result signature over the stripped request, including fixed IVs;
+- recomputed claim identifier and signing payload hash;
+- signed `hiddenPredicate.proofHash` against the detached predicate proof;
+- transcript commitment derived from `hiddenPredicate.transcriptBinding`;
+- ciphertext hash against the signed `hiddenPredicate.transcriptBinding`;
+- replayable reveal proof range binding;
+- replayed Reclaim ZK/TOPRF verification for the signed hidden transcript range;
+- warning metadata for missing independent-verification material.
+
+The verifier does not learn the raw hidden age value from the signed claim
+context.
+
+In the role-based demo path, the package includes the hidden TLS record
+ciphertext, the replayable `zkReveal`, and the attestor result signature over
+the stripped request that contains the fixed IVs. The signed claim context
+contains the ciphertext hash and cipher suite. This lets the third-party
+verifier detect client-side ciphertext / hidden-witness substitution by
+checking the signed ciphertext hash and rerunning `verifyZkPacket(...)`.
+
+### Regression Tests
+
+The role-based demo above is the user-facing path. The lower-level regression
+tests remain useful while editing the fork:
+
+```bash
+npm run run:test-files -- --test src/tests/experimental-predicate.test.ts
+npm run run:test-files -- --test-name-pattern "experimental predicate" --test src/tests/claim-creation.test.ts
+npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
+```
+
 ## Flow
 
 ```text
@@ -95,6 +290,9 @@ Third Party
   |       - checks hiddenPredicate/proof hash
   |       - checks transcript commitment
   |       - checks replayable reveal proof binding
+  |       - checks ciphertext hash binding
+  |       - verifies attestor result signature for fixed IVs
+  |       - reruns verifyZkPacket(...) for the signed hidden range
   v
 Accept / Reject
 ```
@@ -114,22 +312,27 @@ Accept / Reject
 | Leak raw hidden nullifier in signed context | Signed statement stores `hiddenValueBindingHash` only | `buildHiddenPredicateStatement` in `experimental-predicate.ts` |
 | Reattach the detached predicate proof to another signed claim | `proofHash` check against signed `hiddenPredicate` | `verifyExperimentalPredicateProofPackage` in `experimental-predicate-package.ts` |
 | Modify provider, parameters, context, owner, timestamp, or epoch after signing | Attestor claim signature check | `verifyClaimSignature` in `experimental-predicate-package.ts` |
+| Modify the signed request fixed IVs after attestation | Attestor result signature check | `verifyResultSignature` in `experimental-predicate-package.ts` |
 | Modify provider, parameters, or context while keeping stale identifier | Identifier recomputation | `computeClaimIdentifier` in `experimental-predicate-package.ts` |
 | Modify the claim signing payload description | Signing payload hash check | `buildClaimSigningPayload` and `verifyExperimentalPredicateProofPackage` |
 | Modify transcript record number, packet offset, length, or nullifier hash in the package commitment | Commitment recomputation | `buildAttestorObservedTranscriptCommitment` and `verifyExperimentalPredicateProofPackage` |
+| Modify the replayed ciphertext for the hidden TLS record | Signed ciphertext hash check, then `verifyZkPacket(...)` replay | `verifyReplayableRevealProof` |
 | Make `hiddenValueBindingHash` inconsistent with the transcript binding nullifier hash | Hash equality check | `verifyExperimentalPredicateProofPackage` |
-| Omit replayable reveal metadata but claim independent third-party verification | Warning consistency check | `verifyReplayableRevealProof` in `experimental-predicate-package.ts` |
+| Omit attestor-observed ciphertext, result signature, or signed request but claim independent third-party verification | Warning consistency check | `verifyReplayableRevealProof` in `experimental-predicate-package.ts` |
+| Omit replayable reveal metadata | Warning consistency check | `verifyReplayableRevealProof` |
 | Attach replayable reveal metadata from another range | Transcript range binding check | `verifyReplayableRevealProof` |
 | Modify replayable reveal metadata after package creation | Replay proof hash check | `verifyReplayableRevealProof` |
+| Modify `zkReveal` so it no longer proves the signed hidden transcript binding | Replayed ZK/TOPRF verification | `verifyReplayableZkPacket` in `experimental-predicate-package.ts` |
 | Use a toy proof with the wrong predicate result or shape | Verifier adapter check | `verifyProfileAgeGte20ToyProof` in `experimental-predicate-verifier.ts` |
 
 ## Current Limitations
 
 - The predicate verifier adapter is experimental and toy-only.
-- The third-party package verifier checks replayable reveal metadata binding, but
-  does not itself rerun the full ZK verifier. A caller that wants full replay
-  should feed the bundled `zkReveal` and original TLS record material into
-  Reclaim's existing `verifyZkPacket(...)` path.
+- The role-based demo package includes enough material for the third-party
+  verifier to rerun Reclaim ZK/TOPRF verification for the signed hidden range.
+  This branch still uses a toy predicate proof and demo OPRF operator. A
+  production design should obtain the real verifier artifacts and OPRF/ZK
+  operators from a shared registry instead of script-local demo registration.
 - `replayableRevealProof` is available only if the caller captures the original
   `ClaimTunnelRequest.transcript` via `onClaimRequestPrepared`.
 - This branch is not a production API. It is a proof-of-concept for evaluating

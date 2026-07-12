@@ -1,3 +1,5 @@
+import { createHash } from 'crypto'
+
 import type { CipherSuite } from '@reclaimprotocol/tls'
 import { concatenateUint8Arrays, crypto, generateIV } from '@reclaimprotocol/tls'
 import type {
@@ -477,6 +479,7 @@ export async function verifyZkPacket(
 ) {
 	const { proofs, toprfs, oprfRawMarkers } = zkReveal
 	const algorithm = getZkAlgorithmForCipherSuite(cipherSuite)
+	const ciphertextHash = hashBytes(ciphertext)
 
 	const recordIV = getRecordIV(ciphertext, cipherSuite)
 	ciphertext = new Uint8Array(getPureCiphertext(ciphertext, cipherSuite))
@@ -688,6 +691,8 @@ export async function verifyZkPacket(
 				length: dataLocation.length,
 				recordNumber,
 				packetOffset: locations[0].pos + startIdx,
+				cipherSuite,
+				ciphertextHash,
 			},
 		}
 	}
@@ -702,6 +707,12 @@ export async function verifyZkPacket(
 			|| EXPERIMENTAL_OPRF_OPERATOR_OVERRIDES[algorithm]
 			|| makeDefaultOPRFOperator(algorithm, zkEngine, logger)
 	}
+}
+
+function hashBytes(value: Uint8Array) {
+	return createHash('sha256')
+		.update(value)
+		.digest('hex')
 }
 
 // the chunk size of the ZK circuit in bytes

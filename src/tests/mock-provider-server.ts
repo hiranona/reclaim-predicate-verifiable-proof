@@ -15,7 +15,7 @@ import { logger } from '#src/utils/index.ts'
  * Eg. to claim the email address "abcd@mock.com", the header
  * should be "Authorization: Bearer abcd".
  */
-export function createMockServer(port: number) {
+export function createMockServer(port: number, host = '127.0.0.1') {
 	const tlsSessionStore: Record<string, Buffer> = {}
 
 	const server = createServer(
@@ -100,7 +100,7 @@ export function createMockServer(port: number) {
 		}
 	})
 
-	server.listen(port)
+	server.listen(port, host)
 
 	return { server, tlsSessionStore }
 }

@@ -10,6 +10,7 @@ browser/resources
 example-local
 .idea
 coverage/
+artifacts/
 ngrok.yml
 src/test.ts
 .env.*

@@ -29,7 +29,7 @@ const ATTESTOR_ADDRESS_JSON_RES = JSON.stringify({
  * creates a fileserver to serve the browser RPC client,
  * and listens on the given port.
  */
-export async function createServer(port = PORT) {
+export async function createServer(port = PORT, host?: string) {
 	const http = createHttpServer()
 	const serveBrowserRpc = serveStatic(
 		'browser',
@@ -80,7 +80,7 @@ export async function createServer(port = PORT) {
 	})
 
 	// wait for us to start listening
-	http.listen(port)
+	http.listen(port, host)
 	await new Promise<void>((resolve, reject) => {
 		http.once('listening', () => resolve())
 		http.once('error', reject)
@@ -91,6 +91,7 @@ export async function createServer(port = PORT) {
 	LOGGER.info(
 		{
 			port,
+			host,
 			apiPath: WS_PATHNAME,
 			browserRpcPath: BROWSER_RPC_PATHNAME,
 			signerAddress: getAttestorAddress(SelectedServiceSignatureType)

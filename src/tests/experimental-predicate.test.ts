@@ -268,8 +268,11 @@ describe('experimental predicate proof binding', () => {
 			typeof pkg.reveal.attestorObservedTranscriptCommitment.commitmentHash,
 			'string'
 		)
-		assert.equal(pkg.warning.independentThirdPartyVerification, true)
-		assert.deepEqual(pkg.warning.missing, [])
+		assert.equal(pkg.warning.independentThirdPartyVerification, false)
+		assert.deepEqual(pkg.warning.missing, [
+			'attestation.resultSignature',
+			'attestation.signedRequest',
+		])
 		assert.equal(
 			pkg.reveal.replayableRevealProof?.records[0].packetOffset,
 			10
@@ -418,6 +421,8 @@ function hiddenPredicateForProof(proof: ExperimentalPredicateProof) {
 			packetOffset: 10,
 			length: 2,
 			nullifierHash: '2b954e7c5c9841c58136066ee81261ecfec31beeae98016653c777ed85896c5a',
+			cipherSuite: 'TLS_AES_256_GCM_SHA384',
+			ciphertextHash: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
 		},
 		predicate: proof.predicate,
 		predicateResult: true,

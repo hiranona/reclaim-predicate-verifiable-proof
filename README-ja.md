@@ -49,6 +49,194 @@ toy adapter です。本番相当にするには、実 circuit verifier と veri
   - replay 可能な第三者検証 package を作るために、`ClaimTunnelRequest.transcript` を保持できる
     `onClaimRequestPrepared` hook を提供する。
 
+## Usage: Role-Based Demo
+
+このデモは、origin HTTPS server、Reclaim proxy/attestor、client/prover、
+third-party verifier を別々の terminal command に分けて、protocol の形を見せるものです。
+
+示す statement は次です。
+
+```text
+https://localhost:9443/profile の JSON field $.age は age >= 20 を満たす。
+raw age value は signed claim context には入れない。
+```
+
+デモ用 response body は次です。
+
+```json
+{"name":"alice","age":25,"height":170}
+```
+
+predicate verifier は toy adapter です。これは本物の range-proof 実装ではなく、
+実 circuit verifier、circuit hash、verifying key、registry entry をどこに差し込むかを
+示すためのものです。
+
+この section のコマンドは、この repository root から実行します。
+
+```bash
+cd reclaim-predicate-verifiable-proof
+```
+
+### 依存関係を入れる
+
+```bash
+npm ci
+```
+
+以下のコマンドでは `.env.test` の local demo key を読むため、`NODE_ENV=test` を付けます。
+
+### Role 対応表
+
+| Role | Command | データ境界 |
+| --- | --- | --- |
+| Origin HTTPS server | `npm run demo:predicate:fixture` | `/profile` で profile JSON を返す。 |
+| Proxy / Attestor | `npm run demo:predicate:attestor` | Reclaim transcript、TOPRF/ZK reveal、hidden-value binding、predicate proof を検証して claim に署名する。 |
+| Client fetch step | `npm run demo:predicate:fetch` | origin の profile JSON を読み、client が観測した入力ファイルを書き出す。 |
+| Client / Prover | `npm run demo:predicate:client` | client 観測入力ファイルを読み、attestor 経由で取得し、hidden predicate を証明し、第三者検証 package JSON を出力する。 |
+| Third-party verifier | `npm run demo:predicate:verify` | package JSON を読み、attestor signature、claim binding、predicate proof hash、transcript binding、replayable reveal binding を検証する。 |
+
+### 1. Origin HTTPS Server
+
+Terminal 1:
+
+```bash
+NODE_ENV=test npm run demo:predicate:fixture -- --host localhost --port 9443 --age 25
+```
+
+local HTTPS fixture は次で起動します。
+
+```text
+https://localhost:9443/profile
+```
+
+選択対象 field は `$.age` です。証明したい predicate は `age >= 20` です。
+
+### 2. Proxy / Attestor
+
+Terminal 2:
+
+```bash
+NODE_ENV=test npm run demo:predicate:attestor -- \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --out-dir artifacts/experimental-predicate-demo/attestor
+```
+
+local Reclaim attestor は次で起動します。
+
+```text
+ws://127.0.0.1:8001/ws
+```
+
+起動時に、次の demo predicate verifier を登録します。
+
+```text
+template: experimental-predicate-demo-profile-v1
+selector: $.age
+predicate: age >= 20
+proof system: toy
+```
+
+attestor 側 demo metadata は次に書き出します。
+
+```text
+artifacts/experimental-predicate-demo/attestor/attestor-metadata.json
+```
+
+production design では、この verifier registration は、provider template、selector、
+predicate schema、circuit hash、verifier artifact を対応づける共用 predicate registry に
+置き換えるべきです。
+
+### 3a. Client Fetch Step
+
+Terminal 3:
+
+```bash
+NODE_ENV=test npm run demo:predicate:fetch -- \
+  --fixture-url https://localhost:9443/profile \
+  --out-file artifacts/experimental-predicate-demo/client/client-observed-profile.json
+```
+
+これは client 側の curl 相当 step です。client が predicate witness input として使う
+profile body を次に書き出します。
+
+```text
+artifacts/experimental-predicate-demo/client/client-observed-profile.json
+```
+
+改ざん確認をしたい場合は、3b を実行する前にこの file を編集します。たとえば
+`"age": 25` を `"age": 15` に変えると、client 側の proof generation が失敗します。
+`99` など別の値に変えると、predicate proof が Reclaim transcript 経由で観測された
+TOPRF hidden value と一致しなくなるため、後続の attestor binding が失敗します。
+
+### 3b. Client / Prover
+
+Terminal 3:
+
+```bash
+NODE_ENV=test npm run demo:predicate:client -- \
+  --fixture-url https://localhost:9443/profile \
+  --attestor-url ws://127.0.0.1:8001/ws \
+  --profile-file artifacts/experimental-predicate-demo/client/client-observed-profile.json \
+  --out-dir artifacts/experimental-predicate-demo/client
+```
+
+client/prover は次を実行します。
+
+- `client-observed-profile.json` を読み、toy `age >= 20` predicate proof input を作る。
+- fixture URL を Reclaim attestor 経由で取得する。
+- `$.age` を `responseRedactions: [{ jsonPath: "$.age", hash: "oprf" }]` として隠す。
+- claim context に `experimentalPredicateProof` を付ける。
+- prepared `ClaimTunnelRequest.transcript` を保持する。
+- attestor から signed Reclaim claim を受け取る。
+- 第三者検証 package を次に書き出す。
+
+```text
+artifacts/experimental-predicate-demo/client/predicate-package.json
+```
+
+signed claim context には `hiddenPredicate` が含まれます。raw hidden age value は含まれません。
+
+### 4. Third-Party Verifier
+
+Terminal 4:
+
+```bash
+NODE_ENV=test npm run demo:predicate:verify -- \
+  --package artifacts/experimental-predicate-demo/client/predicate-package.json
+```
+
+verifier は package file だけを読み、次を検証します。
+
+- attestor claim signature;
+- fixed IV を含む stripped request に対する attestor result signature;
+- 再計算した claim identifier と signing payload hash;
+- signed `hiddenPredicate.proofHash` と detached predicate proof;
+- `hiddenPredicate.transcriptBinding` から導出される transcript commitment;
+- signed `hiddenPredicate.transcriptBinding` に対する ciphertext hash;
+- replayable reveal proof の range binding;
+- signed hidden transcript range について replay した Reclaim ZK/TOPRF verification;
+- independent-verification material の不足に関する warning metadata。
+
+verifier は signed claim context から raw hidden age value を知りません。
+
+role-based demo path では、package に hidden TLS record ciphertext、replay 可能な
+`zkReveal`、fixed IV を含む stripped request への attestor result signature が入ります。
+signed claim context には ciphertext hash と cipher suite が入ります。これにより
+third-party verifier は、signed ciphertext hash を確認し、`verifyZkPacket(...)` を
+再実行することで client 側の ciphertext / hidden witness 差し替えを検知できます。
+
+### Regression Tests
+
+上の role-based demo が利用者向けの入口です。fork を編集するときは、下の低レイヤーの
+regression tests も有用です。
+
+```bash
+npm run run:test-files -- --test src/tests/experimental-predicate.test.ts
+npm run run:test-files -- --test-name-pattern "experimental predicate" --test src/tests/claim-creation.test.ts
+npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
+```
+
 ## フロー
 
 ```text
@@ -92,6 +280,9 @@ Third Party
   |       - hiddenPredicate/proof hash を確認
   |       - transcript commitment を確認
   |       - replayable reveal proof binding を確認
+  |       - ciphertext hash binding を確認
+  |       - fixed IVs について attestor result signature を確認
+  |       - signed hidden range について verifyZkPacket(...) を再実行
   v
 Accept / Reject
 ```
@@ -111,21 +302,27 @@ Accept / Reject
 | signed context に raw hidden nullifier を残す | signed statement は `hiddenValueBindingHash` のみ保持 | `buildHiddenPredicateStatement` in `experimental-predicate.ts` |
 | predicate proof を別の signed claim に付け替える | signed `hiddenPredicate.proofHash` と predicate proof hash の照合 | `verifyExperimentalPredicateProofPackage` in `experimental-predicate-package.ts` |
 | provider、parameters、context、owner、timestamp、epoch を署名後に変える | attestor claim signature 検証 | `verifyClaimSignature` in `experimental-predicate-package.ts` |
+| attestation 後に signed request の fixed IVs を変える | attestor result signature 検証 | `verifyResultSignature` in `experimental-predicate-package.ts` |
 | provider、parameters、context を変えて古い identifier を残す | identifier 再計算 | `computeClaimIdentifier` in `experimental-predicate-package.ts` |
 | claim signing payload description を変える | signing payload hash の照合 | `buildClaimSigningPayload` and `verifyExperimentalPredicateProofPackage` |
 | package commitment 内の record number、packet offset、length、nullifier hash を変える | commitment 再計算 | `buildAttestorObservedTranscriptCommitment` and `verifyExperimentalPredicateProofPackage` |
+| hidden TLS record の replay ciphertext を変える | signed ciphertext hash check、その後の `verifyZkPacket(...)` replay | `verifyReplayableRevealProof` |
 | `hiddenValueBindingHash` と transcript binding の nullifier hash をずらす | hash equality check | `verifyExperimentalPredicateProofPackage` |
-| replayable reveal metadata がないのに独立第三者検証可能と主張する | warning consistency check | `verifyReplayableRevealProof` in `experimental-predicate-package.ts` |
+| attestor-observed ciphertext、result signature、signed request がないのに独立第三者検証可能と主張する | warning consistency check | `verifyReplayableRevealProof` in `experimental-predicate-package.ts` |
+| replayable reveal metadata を省く | warning consistency check | `verifyReplayableRevealProof` |
 | replayable reveal metadata を別 range のものに差し替える | transcript range binding check | `verifyReplayableRevealProof` |
 | replayable reveal metadata を package 作成後に変える | replay proof hash check | `verifyReplayableRevealProof` |
+| signed hidden transcript binding を証明しない `zkReveal` に変える | replayed ZK/TOPRF verification | `verifyReplayableZkPacket` in `experimental-predicate-package.ts` |
 | toy proof の predicate result や形状を変える | verifier adapter check | `verifyProfileAgeGte20ToyProof` in `experimental-predicate-verifier.ts` |
 
 ## 現在の制約
 
 - predicate verifier adapter は実験用かつ toy 実装です。
-- third-party package verifier は replayable reveal metadata の束縛を確認しますが、それ単体では
-  full ZK verifier を再実行しません。完全に replay したい caller は、package 内の `zkReveal` と
-  元 TLS record material を Reclaim 既存の `verifyZkPacket(...)` path に渡す必要があります。
+- role-based demo package には、third-party verifier が signed hidden range について
+  Reclaim ZK/TOPRF verification を再実行するための material が入ります。ただし、このブランチは
+  toy predicate proof と demo OPRF operator を使っています。本番設計では script-local な
+  demo registration ではなく、共用 registry から実 verifier artifact と OPRF/ZK operator を
+  解決するべきです。
 - `replayableRevealProof` を含めるには、caller が `onClaimRequestPrepared` で元の
   `ClaimTunnelRequest.transcript` を保持している必要があります。
 - このブランチは production API ではなく、Reclaim 既存の TOPRF/ZK 機構で hidden predicate

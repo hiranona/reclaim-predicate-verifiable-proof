@@ -39,14 +39,15 @@ export const describeWithServer = (
 
 	let privateKeyHex: string
 	let client: AttestorClient
+	const testHost = '127.0.0.1'
 
 	const wsServerPort = getRandomPort()
 	const httpsServerPort = getRandomPort()
 
-	const mockHttpsServer = createMockServer(httpsServerPort)
+	const mockHttpsServer = createMockServer(httpsServerPort, testHost)
 
 	before(async() => {
-		wsServer = await createServer(wsServerPort)
+		wsServer = await createServer(wsServerPort, testHost)
 		wsServerUrl = `ws://localhost:${wsServerPort}${WS_PATHNAME}`
 	})
 

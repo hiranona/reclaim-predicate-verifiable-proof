@@ -50,6 +50,8 @@ export type HiddenPredicateStatement = {
 		packetOffset: number
 		length: number
 		nullifierHash: string
+		cipherSuite: string
+		ciphertextHash: string
 	}
 	predicate: ExperimentalPredicateProof['predicate']
 	predicateResult: true
@@ -194,6 +196,8 @@ function buildHiddenPredicateStatement(
 			packetOffset: hiddenBinding.packetOffset,
 			length: hiddenBinding.length,
 			nullifierHash: hashCanonical(hiddenBinding.nullifierText),
+			cipherSuite: hiddenBinding.cipherSuite,
+			ciphertextHash: hiddenBinding.ciphertextHash,
 		},
 		predicate: proof.predicate,
 		predicateResult: true,
@@ -204,6 +208,6 @@ function buildHiddenPredicateStatement(
 
 function hashCanonical(value: unknown) {
 	return createHash('sha256')
-		.update(canonicalStringify(value) || 'null')
+		.update(canonicalStringify(value as { [key: string]: any }) || 'null')
 		.digest('hex')
 }

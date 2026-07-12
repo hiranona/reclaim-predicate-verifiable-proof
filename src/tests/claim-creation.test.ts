@@ -319,7 +319,7 @@ describeWithServer('Claim Creation', opts => {
 					'$.emailAddress'
 				)
 				assert.equal(pkg.warning.independentThirdPartyVerification, true)
-				assert.equal(pkg.warning.missing.length, 0)
+				assert.deepEqual(pkg.warning.missing, [])
 				assert.ok(pkg.reveal.replayableRevealProof)
 			} finally {
 				EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS.delete(
