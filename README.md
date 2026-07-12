@@ -169,6 +169,11 @@ client will use as predicate witness input:
 artifacts/experimental-predicate-demo/client/client-observed-profile.json
 ```
 
+This step is included only to make plaintext tamper checks easy to inspect in
+the demo. It is not the trust root of the Reclaim claim, and a production client
+would normally derive the witness input during the attestor-mediated fetch in
+3b instead of doing this separate curl-like fetch.
+
 For tamper checks, edit this file before running 3b. For example, changing
 `"age": 25` to `"age": 15` makes proof generation fail locally. Changing it to
 another value such as `99` makes the later attestor binding fail because the
@@ -201,6 +206,9 @@ The client/prover does the following:
 ```text
 artifacts/experimental-predicate-demo/client/predicate-package.json
 ```
+
+This command is run by the client/prover, but the accept/reject decision is made
+by the proxy/attestor during claim verification.
 
 The signed claim context contains `hiddenPredicate`. It does not contain the raw
 hidden age value.
@@ -252,39 +260,39 @@ npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
 ```text
 Client
   |
-  | 1. Fetch HTTPS response through Reclaim attestor
-  | 2. Select JSON field with responseRedactions[... hash: "oprf"]
-  | 3. Generate TOPRF/ZK reveal for the hidden response segment
-  | 4. Attach experimentalPredicateProof in claim context
+  | A. Fetch HTTPS response through Reclaim attestor
+  | B. Select JSON field with responseRedactions[... hash: "oprf"]
+  | C. Generate TOPRF/ZK reveal for the hidden response segment
+  | D. Attach experimentalPredicateProof in claim context
   v
 Attestor
   |
-  | 5. verifyZkPacket(...)
+  | E. verifyZkPacket(...)
   |      - verifies ZK/TOPRF reveal
   |      - records HiddenValueBinding
   |
-  | 6. assertExperimentalPredicateProof(...)
+  | F. assertExperimentalPredicateProof(...)
   |      - checks selector/template/circuit/predicate result
   |      - checks proof public input binds to HiddenValueBinding
   |      - calls registered predicate verifier
   |
-  | 7. assertValidProviderTranscript(...)
+  | G. assertValidProviderTranscript(...)
   |      - deletes experimentalPredicateProof
   |      - writes hiddenPredicate into signed claim context
   |
-  | 8. claimTunnel(...)
+  | H. claimTunnel(...)
   |      - signs createSignDataForClaim(claim)
   v
 Signed Reclaim Claim
   |
-  | 9. buildExperimentalPredicateProofPackageFromClaimResponse(...)
+  | I. buildExperimentalPredicateProofPackageFromClaimResponse(...)
   |      - adds attestor signature material
   |      - adds transcript commitment
   |      - optionally copies replayable zkReveal/TOPRF metadata
   v
 Third Party
   |
-  | 10. verifyExperimentalPredicateProofPackage(...)
+  | J. verifyExperimentalPredicateProofPackage(...)
   |       - verifies claim signature
   |       - recomputes claim identifier and signing payload hash
   |       - checks hiddenPredicate/proof hash

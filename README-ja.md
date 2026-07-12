@@ -164,6 +164,10 @@ profile body を次に書き出します。
 artifacts/experimental-predicate-demo/client/client-observed-profile.json
 ```
 
+この step は、demo で平文改ざん確認を見やすくするためだけに分けています。これは
+Reclaim claim の信頼の起点ではありません。本番 client では、この別個の curl 相当 fetch は
+通常不要で、3b の attestor-mediated fetch の中で witness input を作る形が自然です。
+
 改ざん確認をしたい場合は、3b を実行する前にこの file を編集します。たとえば
 `"age": 25` を `"age": 15` に変えると、client 側の proof generation が失敗します。
 `99` など別の値に変えると、predicate proof が Reclaim transcript 経由で観測された
@@ -194,6 +198,9 @@ client/prover は次を実行します。
 ```text
 artifacts/experimental-predicate-demo/client/predicate-package.json
 ```
+
+このコマンドを実行するのは client/prover ですが、claim を accept/reject するのは
+claim verification 中の proxy/attestor です。
 
 signed claim context には `hiddenPredicate` が含まれます。raw hidden age value は含まれません。
 
@@ -242,39 +249,39 @@ npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
 ```text
 Client
   |
-  | 1. Reclaim attestor 経由で HTTPS response を取得
-  | 2. responseRedactions[... hash: "oprf"] で JSON field を選択
-  | 3. 隠した response segment について TOPRF/ZK reveal を生成
-  | 4. claim context に experimentalPredicateProof を付ける
+  | A. Reclaim attestor 経由で HTTPS response を取得
+  | B. responseRedactions[... hash: "oprf"] で JSON field を選択
+  | C. 隠した response segment について TOPRF/ZK reveal を生成
+  | D. claim context に experimentalPredicateProof を付ける
   v
 Attestor
   |
-  | 5. verifyZkPacket(...)
+  | E. verifyZkPacket(...)
   |      - ZK/TOPRF reveal を検証
   |      - HiddenValueBinding を記録
   |
-  | 6. assertExperimentalPredicateProof(...)
+  | F. assertExperimentalPredicateProof(...)
   |      - selector/template/circuit/predicate result を確認
   |      - proof public input が HiddenValueBinding に束縛されているか確認
   |      - 登録済み predicate verifier を呼ぶ
   |
-  | 7. assertValidProviderTranscript(...)
+  | G. assertValidProviderTranscript(...)
   |      - experimentalPredicateProof を削除
   |      - hiddenPredicate を signed claim context に書く
   |
-  | 8. claimTunnel(...)
+  | H. claimTunnel(...)
   |      - createSignDataForClaim(claim) に署名
   v
 Signed Reclaim Claim
   |
-  | 9. buildExperimentalPredicateProofPackageFromClaimResponse(...)
+  | I. buildExperimentalPredicateProofPackageFromClaimResponse(...)
   |      - attestor signature material を追加
   |      - transcript commitment を追加
   |      - replayable zkReveal/TOPRF metadata を必要に応じてコピー
   v
 Third Party
   |
-  | 10. verifyExperimentalPredicateProofPackage(...)
+  | J. verifyExperimentalPredicateProofPackage(...)
   |       - claim signature を検証
   |       - claim identifier と signing payload hash を再計算
   |       - hiddenPredicate/proof hash を確認
