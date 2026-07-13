@@ -12,7 +12,10 @@ import {
 	type ExperimentalPredicateProofPackage,
 	verifyExperimentalPredicateProofPackage
 } from '#src/providers/http/experimental-predicate-package.ts'
-import { makeProfileAgeGte20ToyVerifier } from '#src/providers/http/experimental-predicate-verifier.ts'
+import {
+	makeDemoChallengeToyVerifier,
+	makeProfileAgeGte20ToyVerifier
+} from '#src/providers/http/experimental-predicate-verifier.ts'
 import {
 	ServiceSignatureType,
 	TranscriptMessageSenderType,
@@ -142,6 +145,54 @@ describe('experimental predicate proof binding', () => {
 				publicInput: {
 					...proof.publicInput,
 					predicateResult: false,
+				},
+			}),
+			false
+		)
+	})
+
+	it('verifies the experimental income verifier adapter', () => {
+		const proof = withCircuitHash({
+			...BASE_PROOF,
+			providerTemplateHash: 'income-template-hash',
+			responseSelector: '$.annualIncome',
+			predicate: {
+				kind: 'income_gte',
+				threshold: 50000,
+				currency: 'USD',
+			},
+			publicInput: {
+				...BASE_PROOF.publicInput,
+				providerTemplateHash: 'income-template-hash',
+				responseSelector: '$.annualIncome',
+				hiddenValueBinding: '"annualIncome":85000',
+			},
+			proof: {
+				system: 'toy',
+				payload: {
+					demo: 'income-gte-50000-usd',
+				},
+			},
+		})
+		const verifier = makeDemoChallengeToyVerifier({
+			templateHash: 'income-template-hash',
+			responseSelector: '$.annualIncome',
+			predicate: {
+				kind: 'income_gte',
+				threshold: 50000,
+				currency: 'USD',
+			},
+		})
+
+		assert.equal(verifier.circuitHash, proof.publicInput.circuitHash)
+		assert.equal(verifier.verify(proof), true)
+		assert.equal(
+			verifier.verify({
+				...proof,
+				predicate: {
+					kind: 'income_gte',
+					threshold: 90000,
+					currency: 'USD',
 				},
 			}),
 			false

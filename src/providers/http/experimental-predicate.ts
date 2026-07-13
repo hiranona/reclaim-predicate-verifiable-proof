@@ -13,10 +13,7 @@ export type ExperimentalPredicateProof = {
 	version: 'tlsn-mpc-lab.profile-age-predicate.v1'
 	providerTemplateHash: string
 	responseSelector: string
-	predicate: {
-		kind: 'age_gte'
-		threshold: number
-	}
+	predicate: ExperimentalPredicate
 	publicInput: {
 		providerTemplateHash: string
 		responseSelector: string
@@ -29,6 +26,17 @@ export type ExperimentalPredicateProof = {
 		payload: unknown
 	}
 }
+
+export type ExperimentalPredicate =
+	| {
+		kind: 'age_gte'
+		threshold: number
+	}
+	| {
+		kind: 'income_gte'
+		threshold: number
+		currency: 'USD'
+	}
 
 export type ExperimentalPredicateProofVerifier = (
 	proof: ExperimentalPredicateProof
@@ -94,11 +102,7 @@ export async function assertExperimentalPredicateProof(
 		throw new Error('Predicate proof circuit hash mismatch')
 	}
 
-	if(
-		proof.predicate.kind !== 'age_gte'
-		|| proof.predicate.threshold !== 20
-		|| proof.publicInput.predicateResult !== true
-	) {
+	if(!isSupportedTruePredicateClaim(proof)) {
 		throw new Error('Unsupported or false predicate proof claim')
 	}
 
@@ -125,6 +129,23 @@ export async function assertExperimentalPredicateProof(
 	}
 
 	return buildHiddenPredicateStatement(proof, hiddenBinding)
+}
+
+function isSupportedTruePredicateClaim(proof: ExperimentalPredicateProof) {
+	if(proof.publicInput.predicateResult !== true) {
+		return false
+	}
+
+	if(proof.predicate.kind === 'age_gte') {
+		return Number.isFinite(proof.predicate.threshold)
+	}
+
+	if(proof.predicate.kind === 'income_gte') {
+		return Number.isFinite(proof.predicate.threshold)
+			&& proof.predicate.currency === 'USD'
+	}
+
+	return false
 }
 
 function assertPredicateProofShape(

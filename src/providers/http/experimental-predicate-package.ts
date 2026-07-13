@@ -79,7 +79,7 @@ export type ReplayableRevealProof = {
 		packetOffset: number
 		length: number
 		ciphertext: string
-		zkReveal: MessageReveal['zkReveal']
+		zkReveal: NonNullable<MessageReveal['zkReveal']>
 	}>
 	proofHash: string
 }
@@ -365,7 +365,7 @@ function buildReplayableRevealProof(
 			packetOffset: hiddenPredicate.transcriptBinding.packetOffset,
 			length: hiddenPredicate.transcriptBinding.length,
 			ciphertext: bytesToHex(getWithoutHeader(message.message)),
-			zkReveal: message.reveal!.zkReveal,
+			zkReveal: message.reveal!.zkReveal!,
 		}))
 
 	if(!records.length) {

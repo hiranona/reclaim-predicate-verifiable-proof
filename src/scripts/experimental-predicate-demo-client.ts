@@ -13,9 +13,10 @@ import {
 import type { ClaimTunnelRequest } from '#src/proto/api.ts'
 import {
 	addDemoRootCertificate,
-	assertDemoProfile,
-	buildDemoPredicateProof,
+	assertDemoResponse,
+	buildDemoPredicateProofForChallenge,
 	getArg,
+	getDemoChallenge,
 	installDemoOprfOverrides,
 } from '#src/scripts/experimental-predicate-demo-utils.ts'
 import { providers } from '#src/providers/index.ts'
@@ -26,12 +27,25 @@ setCryptoImplementation(webcryptoCrypto)
 addDemoRootCertificate()
 const oprfOperator = installDemoOprfOverrides()
 
-const fixtureUrl = getArg('fixture-url', 'https://localhost:9443/profile')!
+const challenge = getDemoChallenge()
+const fixtureUrl = getArg(
+	'fixture-url',
+	`https://localhost:9443${challenge.endpoint}`
+)!
 const attestorUrl = getArg('attestor-url', 'ws://127.0.0.1:8001/ws')!
 const outDir = getArg('out-dir', 'artifacts/experimental-predicate-demo/client')!
 const profileFile = getArg(
 	'profile-file',
-	path.join(outDir, 'client-observed-profile.json')
+	path.join(outDir, challenge.outputFileName)
+)!
+const packageFile = getArg(
+	'package-file',
+	path.join(
+		outDir,
+		challenge.name === 'age'
+			? 'predicate-package.json'
+			: `predicate-package-${challenge.name}.json`
+	)
 )!
 const ownerPrivateKey = getEnvVariable('PRIVATE_KEY_HEX')
 	|| '0x0123788edad59d7c013cdc85e4372f350f828e2cec62d9a2de4560e69aec7f89'
@@ -42,9 +56,9 @@ providers.http.additionalClientOptions = {
 
 await mkdir(outDir, { recursive: true })
 
-const profile = JSON.parse(await readFile(profileFile, 'utf8'))
-assertDemoProfile(profile)
-const proof = buildDemoPredicateProof(profile)
+const responseBody = JSON.parse(await readFile(profileFile, 'utf8'))
+assertDemoResponse(challenge, responseBody)
+const proof = buildDemoPredicateProofForChallenge(challenge, responseBody)
 let preparedRequest: ClaimTunnelRequest | undefined
 const client = new AttestorClient({
 	url: attestorUrl,
@@ -60,7 +74,7 @@ try {
 			method: 'GET',
 			responseRedactions: [
 				{
-					jsonPath: '$.age',
+					jsonPath: challenge.responseSelector,
 					hash: 'oprf',
 				},
 			],
@@ -100,15 +114,16 @@ try {
 		undefined,
 		preparedRequest?.transcript
 	)
-const artifact = {
+	const artifact = {
 		role: 'client-prover-output',
+		demo: challenge.name,
 		inputs: {
 			fixtureUrl,
 			attestorUrl,
 			profileFile,
-			responseSelector: '$.age',
-			predicate: 'age >= 20',
-			observedAge: profile.age,
+			responseSelector: challenge.responseSelector,
+			predicate: challenge.predicate,
+			observedValue: responseBody[challenge.selectedValueKey],
 		},
 		claim: response.claim,
 		signatures: {
@@ -120,11 +135,12 @@ const artifact = {
 		predicateProof: proof.proof,
 		package: pkg,
 	}
-	const artifactPath = path.join(outDir, 'predicate-package.json')
+	const artifactPath = packageFile
 	await writeFile(artifactPath, JSON.stringify(artifact, null, 2))
 
 	console.log(JSON.stringify({
 		role: 'client-prover',
+		demo: challenge.name,
 		artifactPath,
 		claimIdentifier: response.claim.identifier,
 		hiddenPredicate: JSON.parse(response.claim.context).hiddenPredicate,

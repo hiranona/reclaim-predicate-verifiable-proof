@@ -7,10 +7,9 @@ import { setCryptoImplementation } from '@reclaimprotocol/tls'
 import { webcryptoCrypto } from '@reclaimprotocol/tls/webcrypto'
 
 import { EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS, WS_PATHNAME } from '#src/config/index.ts'
-import { makeProfileAgeGte20ToyVerifier } from '#src/providers/http/experimental-predicate-verifier.ts'
+import { makeDemoChallengeToyVerifier } from '#src/providers/http/experimental-predicate-verifier.ts'
 import {
-	DEMO_RESPONSE_SELECTOR,
-	DEMO_TEMPLATE_HASH,
+	DEMO_CHALLENGES,
 	addDemoRootCertificate,
 	getArg,
 	installDemoOprfOverrides,
@@ -24,23 +23,34 @@ installDemoOprfOverrides()
 const host = getArg('host', '127.0.0.1')!
 const port = Number(getArg('port', '8001'))
 const outDir = getArg('out-dir', 'artifacts/experimental-predicate-demo/attestor')!
-const verifier = makeProfileAgeGte20ToyVerifier(
-	DEMO_TEMPLATE_HASH,
-	DEMO_RESPONSE_SELECTOR
-)
-EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS.set(verifier.circuitHash, verifier.verify)
+const registeredPredicateVerifiers = Object.values(DEMO_CHALLENGES)
+	.map(challenge => {
+		const verifier = makeDemoChallengeToyVerifier({
+			templateHash: challenge.templateHash,
+			responseSelector: challenge.responseSelector,
+			predicate: challenge.predicate,
+			proofSystem: 'toy',
+		})
+		EXPERIMENTAL_PREDICATE_PROOF_VERIFIERS.set(
+			verifier.circuitHash,
+			verifier.verify
+		)
+		return {
+			demo: challenge.name,
+			templateHash: challenge.templateHash,
+			responseSelector: challenge.responseSelector,
+			predicate: challenge.predicate,
+			circuitHash: verifier.circuitHash,
+			proofSystem: 'toy',
+		}
+	})
 
 await createServer(port, host)
 
 const metadata = {
 	role: 'proxy-attestor',
 	url: `ws://${host}:${port}${WS_PATHNAME}`,
-	registeredPredicateVerifier: {
-		templateHash: DEMO_TEMPLATE_HASH,
-		responseSelector: DEMO_RESPONSE_SELECTOR,
-		circuitHash: verifier.circuitHash,
-		proofSystem: 'toy',
-	},
+	registeredPredicateVerifiers,
 }
 
 await mkdir(outDir, { recursive: true })

@@ -5,28 +5,37 @@ import https from 'https'
 import path from 'path'
 
 import {
-	assertDemoProfile,
+	assertDemoResponse,
 	getArg,
+	getDemoChallenge,
 } from '#src/scripts/experimental-predicate-demo-utils.ts'
 
-const fixtureUrl = getArg('fixture-url', 'https://localhost:9443/profile')!
+const challenge = getDemoChallenge()
+const fixtureUrl = getArg(
+	'fixture-url',
+	`https://localhost:9443${challenge.endpoint}`
+)!
 const outDir = getArg('out-dir', 'artifacts/experimental-predicate-demo/client')!
-const outFile = getArg('out-file', path.join(outDir, 'client-observed-profile.json'))!
+const outFile = getArg(
+	'out-file',
+	path.join(outDir, challenge.outputFileName)
+)!
 
 await mkdir(path.dirname(outFile), { recursive: true })
 
 const body = await fetchProfile(fixtureUrl)
-const profile = JSON.parse(body)
-assertDemoProfile(profile)
+const response = JSON.parse(body)
+assertDemoResponse(challenge, response)
 
-await writeFile(outFile, `${JSON.stringify(profile, null, 2)}\n`)
+await writeFile(outFile, `${JSON.stringify(response, null, 2)}\n`)
 
 console.log(JSON.stringify({
 	role: 'client-fetch',
+	demo: challenge.name,
 	fixtureUrl,
 	outFile,
-	selectedField: '$.age',
-	observedAge: profile.age,
+	selectedField: challenge.responseSelector,
+	observedValue: response[challenge.selectedValueKey],
 }, null, 2))
 
 function fetchProfile(url: string) {

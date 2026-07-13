@@ -3,22 +3,30 @@ import '#src/server/utils/config-env.ts'
 import { readFileSync } from 'fs'
 import { createServer } from 'https'
 
-import { getArg } from '#src/scripts/experimental-predicate-demo-utils.ts'
+import {
+	getArg,
+	getDemoChallenge,
+} from '#src/scripts/experimental-predicate-demo-utils.ts'
 
 const host = getArg('host', 'localhost')!
 const port = Number(getArg('port', '9443'))
-const age = Number(getArg('age', '25'))
+const challenge = getDemoChallenge()
+const selectedValueArg = getArg('value')
+const selectedValue = selectedValueArg === undefined
+	? undefined
+	: Number(selectedValueArg)
 
-if(!Number.isInteger(age) || age < 0 || age > 120) {
-	throw new Error(`age must be an integer in [0, 120], got ${age}`)
+if(selectedValue !== undefined && !Number.isInteger(selectedValue)) {
+	throw new Error(`value must be an integer, got ${selectedValueArg}`)
 }
 
-const profile = {
-	name: 'alice',
-	age,
-	height: 170,
+const bodyObject = {
+	...challenge.defaultBody,
+	...(selectedValue === undefined
+		? {}
+		: { [challenge.selectedValueKey]: selectedValue }),
 }
-const body = JSON.stringify(profile)
+const body = JSON.stringify(bodyObject)
 
 const server = createServer(
 	{
@@ -26,7 +34,7 @@ const server = createServer(
 		cert: readFileSync('./cert/public-cert.pem'),
 	},
 	(req, res) => {
-		if(req.method !== 'GET' || req.url !== '/profile') {
+		if(req.method !== 'GET' || req.url !== challenge.endpoint) {
 			res.writeHead(404, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'not found' }))
 			return
@@ -43,9 +51,10 @@ const server = createServer(
 server.listen(port, host, () => {
 	console.log(JSON.stringify({
 		role: 'origin-server',
-		url: `https://${host}:${port}/profile`,
+		demo: challenge.name,
+		url: `https://${host}:${port}${challenge.endpoint}`,
 		body,
-		selectedField: '$.age',
-		predicate: 'age >= 20',
+		selectedField: challenge.responseSelector,
+		predicate: challenge.statement,
 	}, null, 2))
 })
