@@ -1,6 +1,6 @@
 import '#src/server/utils/config-env.ts'
 
-import { writeFile, mkdir } from 'fs/promises'
+import { mkdir,writeFile } from 'fs/promises'
 import https from 'https'
 import path from 'path'
 
@@ -10,6 +10,8 @@ import {
 	getDemoChallenge,
 } from '#src/scripts/experimental-predicate-demo-utils.ts'
 
+// Unused by the README demo flow as of 5647445 and later.
+// Kept temporarily for reference; remove once the unified client/prover flow settles.
 const challenge = getDemoChallenge()
 const fixtureUrl = getArg(
 	'fixture-url',

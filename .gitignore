@@ -10,7 +10,12 @@ browser/resources
 example-local
 .idea
 coverage/
-artifacts/
+artifacts/*
+!artifacts/experimental-predicate-demo/
+artifacts/experimental-predicate-demo/*
+!artifacts/experimental-predicate-demo/client/
+artifacts/experimental-predicate-demo/client/*
+!artifacts/experimental-predicate-demo/client/tampered-profile.json
 ngrok.yml
 src/test.ts
 .env.*

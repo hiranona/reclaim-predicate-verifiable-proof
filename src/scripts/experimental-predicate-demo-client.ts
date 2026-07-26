@@ -1,16 +1,17 @@
 import '#src/server/utils/config-env.ts'
 
-import { mkdir, readFile, writeFile } from 'fs/promises'
-import path from 'path'
-
 import { setCryptoImplementation } from '@reclaimprotocol/tls'
 import { webcryptoCrypto } from '@reclaimprotocol/tls/webcrypto'
+import { mkdir, readFile, writeFile } from 'fs/promises'
+import https from 'https'
+import path from 'path'
 
 import { AttestorClient, createClaimOnAttestor } from '#src/client/index.ts'
+import type { ClaimTunnelRequest } from '#src/proto/api.ts'
 import {
 	buildExperimentalPredicateProofPackageFromClaimResponse,
 } from '#src/providers/http/experimental-predicate-package.ts'
-import type { ClaimTunnelRequest } from '#src/proto/api.ts'
+import { providers } from '#src/providers/index.ts'
 import {
 	addDemoRootCertificate,
 	assertDemoResponse,
@@ -19,9 +20,8 @@ import {
 	getDemoChallenge,
 	installDemoOprfOverrides,
 } from '#src/scripts/experimental-predicate-demo-utils.ts'
-import { providers } from '#src/providers/index.ts'
-import { logger } from '#src/utils/index.ts'
 import { getEnvVariable } from '#src/utils/env.ts'
+import { logger } from '#src/utils/index.ts'
 
 setCryptoImplementation(webcryptoCrypto)
 addDemoRootCertificate()
@@ -34,9 +34,13 @@ const fixtureUrl = getArg(
 )!
 const attestorUrl = getArg('attestor-url', 'ws://127.0.0.1:8001/ws')!
 const outDir = getArg('out-dir', 'artifacts/experimental-predicate-demo/client')!
-const profileFile = getArg(
-	'profile-file',
+const observedResponseFile = getArg(
+	'observed-response-file',
 	path.join(outDir, challenge.outputFileName)
+)!
+const predicateInputFile = getArg(
+	'predicate-input-file',
+	getArg('profile-file', observedResponseFile)
 )!
 const packageFile = getArg(
 	'package-file',
@@ -55,10 +59,18 @@ providers.http.additionalClientOptions = {
 }
 
 await mkdir(outDir, { recursive: true })
+await mkdir(path.dirname(observedResponseFile), { recursive: true })
 
-const responseBody = JSON.parse(await readFile(profileFile, 'utf8'))
-assertDemoResponse(challenge, responseBody)
-const proof = buildDemoPredicateProofForChallenge(challenge, responseBody)
+const observedResponse = await fetchDemoResponse(fixtureUrl)
+assertDemoResponse(challenge, observedResponse)
+await writeFile(
+	observedResponseFile,
+	`${JSON.stringify(observedResponse, null, 2)}\n`
+)
+
+const predicateInput = JSON.parse(await readFile(predicateInputFile, 'utf8'))
+assertDemoResponse(challenge, predicateInput)
+const proof = buildDemoPredicateProofForChallenge(challenge, predicateInput)
 let preparedRequest: ClaimTunnelRequest | undefined
 const client = new AttestorClient({
 	url: attestorUrl,
@@ -120,10 +132,12 @@ try {
 		inputs: {
 			fixtureUrl,
 			attestorUrl,
-			profileFile,
+			observedResponseFile,
+			predicateInputFile,
 			responseSelector: challenge.responseSelector,
 			predicate: challenge.predicate,
-			observedValue: responseBody[challenge.selectedValueKey],
+			observedValue: observedResponse[challenge.selectedValueKey],
+			predicateInputValue: predicateInput[challenge.selectedValueKey],
 		},
 		claim: response.claim,
 		signatures: {
@@ -147,4 +161,30 @@ try {
 	}, null, 2))
 } finally {
 	await client.terminateConnection()
+}
+
+function fetchDemoResponse(url: string) {
+	return new Promise<Record<string, unknown>>((resolve, reject) => {
+		https.get(
+			url,
+			{ rejectUnauthorized: false },
+			res => {
+				const chunks: Buffer[] = []
+				res.on('data', chunk => chunks.push(chunk))
+				res.on('end', () => {
+					const responseBody = Buffer.concat(chunks).toString('utf8')
+					if(res.statusCode !== 200) {
+						reject(new Error(`fixture returned HTTP ${res.statusCode}: ${responseBody}`))
+						return
+					}
+
+					try {
+						resolve(JSON.parse(responseBody))
+					} catch(err) {
+						reject(err)
+					}
+				})
+			}
+		).on('error', reject)
+	})
 }

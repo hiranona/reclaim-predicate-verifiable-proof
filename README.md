@@ -165,8 +165,7 @@ embedded in `hiddenPredicate`.
 | --- | --- | --- |
 | Origin HTTPS server | `npm run demo:predicate:fixture` | Serves the selected demo JSON at `/profile` or `/income`. |
 | Proxy / Attestor | `npm run demo:predicate:attestor` | Verifies the Reclaim transcript, TOPRF/ZK reveal, hidden-value binding, and registered predicate proof before signing the claim. |
-| Client fetch step | `npm run demo:predicate:fetch` | Reads the selected origin JSON and writes the client-observed input file. |
-| Client / Prover | `npm run demo:predicate:client` | Reads the client-observed input file, fetches through the attestor, proves the selected hidden predicate, and writes a third-party package JSON file. |
+| Client / Prover | `npm run demo:predicate:client` | Fetches and records the selected origin JSON, reads predicate proof input, fetches through the attestor, proves the selected hidden predicate, and writes a third-party package JSON file. |
 | Third-party verifier | `npm run demo:predicate:verify` | Reads the package JSON and verifies the attestor signature, claim binding, predicate proof hash, transcript binding, and replayable reveal binding. |
 
 ### Demo 1: Alice Age Proof
@@ -238,36 +237,7 @@ In a production design this verifier registration should be replaced by a
 shared predicate registry that maps provider template, selector, predicate
 schema, circuit hash, and verifier artifact.
 
-#### 3a. Client Fetch Step
-
-Terminal 3:
-
-```bash
-NODE_ENV=test npm run demo:predicate:fetch -- \
-  --demo age \
-  --fixture-url https://localhost:9443/profile \
-  --out-file artifacts/experimental-predicate-demo/client/client-observed-profile.json
-```
-
-This is the client-side "curl-like" step. It writes the profile body that the
-client will use as predicate witness input:
-
-```text
-artifacts/experimental-predicate-demo/client/client-observed-profile.json
-```
-
-This step is included only to make plaintext tamper checks easy to inspect in
-the demo. It is not the trust root of the Reclaim claim, and a production client
-would normally derive the witness input during the attestor-mediated fetch in
-3b instead of doing this separate curl-like fetch.
-
-For tamper checks, edit this file before running 3b. For example, changing
-`"age": 25` to `"age": 15` makes proof generation fail locally. Changing it to
-another value such as `99` makes the later attestor binding fail because the
-predicate proof no longer matches the TOPRF hidden value observed through the
-Reclaim transcript.
-
-#### 3b. Client / Prover
+#### 3. Client / Prover
 
 Terminal 3:
 
@@ -276,13 +246,17 @@ NODE_ENV=test npm run demo:predicate:client -- \
   --demo age \
   --fixture-url https://localhost:9443/profile \
   --attestor-url ws://127.0.0.1:8001/ws \
-  --profile-file artifacts/experimental-predicate-demo/client/client-observed-profile.json \
+  --observed-response-file artifacts/experimental-predicate-demo/client/client-observed-profile.json \
   --out-dir artifacts/experimental-predicate-demo/client
 ```
 
 The client/prover does the following:
 
-- reads `client-observed-profile.json` and builds the toy `age >= 20`
+- fetches the fixture URL directly and writes the client-observed body to
+  `client-observed-profile.json`;
+- reads `--predicate-input-file` if supplied, otherwise reads
+  `client-observed-profile.json`;
+- builds the toy `age >= 20`
   predicate proof input;
 - fetches the fixture URL through the Reclaim attestor;
 - marks `$.age` as `responseRedactions: [{ jsonPath: "$.age", hash: "oprf" }]`;
@@ -300,6 +274,25 @@ by the proxy/attestor during claim verification.
 
 The signed claim context contains `hiddenPredicate`. It does not contain the raw
 hidden age value.
+
+For tamper checks, keep the observed response file unchanged and pass a separate
+predicate input file:
+
+```bash
+NODE_ENV=test npm run demo:predicate:client -- \
+  --demo age \
+  --fixture-url https://localhost:9443/profile \
+  --attestor-url ws://127.0.0.1:8001/ws \
+  --observed-response-file artifacts/experimental-predicate-demo/client/client-observed-profile.json \
+  --predicate-input-file artifacts/experimental-predicate-demo/client/tampered-profile.json \
+  --out-dir artifacts/experimental-predicate-demo/client
+```
+
+The checked-in `tampered-profile.json` changes Alice's age to `99`. This still
+satisfies `age >= 20`, so local proof generation succeeds, but the attestor
+rejects it because the predicate proof no longer matches the TOPRF hidden value
+observed through the Reclaim transcript. Changing the predicate input to
+`"age": 15` fails earlier during local proof generation.
 
 #### 4. Third-Party Verifier
 
@@ -353,23 +346,14 @@ NODE_ENV=test npm run demo:predicate:fixture -- \
 ```
 
 If the attestor from Demo 1 is still running, reuse it. It registers both demo
-verifiers at startup. Then fetch the fixture body:
-
-```bash
-NODE_ENV=test npm run demo:predicate:fetch -- \
-  --demo income \
-  --fixture-url https://localhost:9443/income \
-  --out-file artifacts/experimental-predicate-demo/client/client-observed-income.json
-```
-
-Run the client/prover:
+verifiers at startup. Then run the client/prover:
 
 ```bash
 NODE_ENV=test npm run demo:predicate:client -- \
   --demo income \
   --fixture-url https://localhost:9443/income \
   --attestor-url ws://127.0.0.1:8001/ws \
-  --profile-file artifacts/experimental-predicate-demo/client/client-observed-income.json \
+  --observed-response-file artifacts/experimental-predicate-demo/client/client-observed-income.json \
   --package-file artifacts/experimental-predicate-demo/client/predicate-package-income.json \
   --out-dir artifacts/experimental-predicate-demo/client
 ```
@@ -381,16 +365,15 @@ NODE_ENV=test npm run demo:predicate:verify -- \
   --package artifacts/experimental-predicate-demo/client/predicate-package-income.json
 ```
 
-For tamper checks, edit `client-observed-income.json` before running the
-client/prover. Changing `annualIncome` to `40000` fails local proof generation.
-Changing it to another satisfying value, such as `90000`, fails later because
-the predicate proof no longer matches the TOPRF hidden value observed through
-the Reclaim transcript.
+For tamper checks, pass a separate `--predicate-input-file`. Changing
+`annualIncome` to `40000` fails local proof generation. Changing it to another
+satisfying value, such as `90000`, fails later because the predicate proof no
+longer matches the TOPRF hidden value observed through the Reclaim transcript.
 
 ### Adding Another Predicate Demo
 
 To add another demo, define a new verifier challenge and wire it through the
-same four roles:
+same role commands:
 
 1. Define the challenge/template in
    `src/scripts/experimental-predicate-demo-utils.ts`: template id, endpoint,
@@ -444,7 +427,6 @@ Then the same command shape should apply:
 
 ```bash
 NODE_ENV=test npm run demo:predicate:fixture -- --demo balance
-NODE_ENV=test npm run demo:predicate:fetch -- --demo balance
 NODE_ENV=test npm run demo:predicate:client -- --demo balance
 NODE_ENV=test npm run demo:predicate:verify -- --package artifacts/experimental-predicate-demo/client/predicate-package-balance.json
 ```

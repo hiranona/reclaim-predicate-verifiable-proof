@@ -156,8 +156,7 @@ attestor は起動時に両方の challenge verifier を登録します。client
 | --- | --- | --- |
 | Origin HTTPS server | `npm run demo:predicate:fixture` | 選択した demo JSON を `/profile` または `/income` で返す。 |
 | Proxy / Attestor | `npm run demo:predicate:attestor` | Reclaim transcript、TOPRF/ZK reveal、hidden-value binding、登録済み predicate proof を検証して claim に署名する。 |
-| Client fetch step | `npm run demo:predicate:fetch` | 選択した origin JSON を読み、client が観測した入力ファイルを書き出す。 |
-| Client / Prover | `npm run demo:predicate:client` | client 観測入力ファイルを読み、attestor 経由で取得し、選択した hidden predicate を証明し、第三者検証 package JSON を出力する。 |
+| Client / Prover | `npm run demo:predicate:client` | 選択した origin JSON を取得して保存し、predicate proof input を読み、attestor 経由でも取得して hidden predicate を証明し、第三者検証 package JSON を出力する。 |
 | Third-party verifier | `npm run demo:predicate:verify` | package JSON を読み、attestor signature、claim binding、predicate proof hash、transcript binding、replayable reveal binding を検証する。 |
 
 ### Demo 1: Alice Age Proof
@@ -229,34 +228,7 @@ production design では、この verifier registration は、provider template�
 predicate schema、circuit hash、verifier artifact を対応づける共用 predicate registry に
 置き換えるべきです。
 
-#### 3a. Client Fetch Step
-
-Terminal 3:
-
-```bash
-NODE_ENV=test npm run demo:predicate:fetch -- \
-  --demo age \
-  --fixture-url https://localhost:9443/profile \
-  --out-file artifacts/experimental-predicate-demo/client/client-observed-profile.json
-```
-
-これは client 側の curl 相当 step です。client が predicate witness input として使う
-profile body を次に書き出します。
-
-```text
-artifacts/experimental-predicate-demo/client/client-observed-profile.json
-```
-
-この step は、demo で平文改ざん確認を見やすくするためだけに分けています。これは
-Reclaim claim の信頼の起点ではありません。本番 client では、この別個の curl 相当 fetch は
-通常不要で、3b の attestor-mediated fetch の中で witness input を作る形が自然です。
-
-改ざん確認をしたい場合は、3b を実行する前にこの file を編集します。たとえば
-`"age": 25` を `"age": 15` に変えると、client 側の proof generation が失敗します。
-`99` など別の値に変えると、predicate proof が Reclaim transcript 経由で観測された
-TOPRF hidden value と一致しなくなるため、後続の attestor binding が失敗します。
-
-#### 3b. Client / Prover
+#### 3. Client / Prover
 
 Terminal 3:
 
@@ -265,13 +237,16 @@ NODE_ENV=test npm run demo:predicate:client -- \
   --demo age \
   --fixture-url https://localhost:9443/profile \
   --attestor-url ws://127.0.0.1:8001/ws \
-  --profile-file artifacts/experimental-predicate-demo/client/client-observed-profile.json \
+  --observed-response-file artifacts/experimental-predicate-demo/client/client-observed-profile.json \
   --out-dir artifacts/experimental-predicate-demo/client
 ```
 
 client/prover は次を実行します。
 
-- `client-observed-profile.json` を読み、toy `age >= 20` predicate proof input を作る。
+- fixture URL を直接取得し、client が観測した body を `client-observed-profile.json` に書き出す。
+- `--predicate-input-file` が指定されていればそれを読み、未指定なら
+  `client-observed-profile.json` を読む。
+- toy `age >= 20` predicate proof input を作る。
 - fixture URL を Reclaim attestor 経由で取得する。
 - `$.age` を `responseRedactions: [{ jsonPath: "$.age", hash: "oprf" }]` として隠す。
 - claim context に `experimentalPredicateProof` を付ける。
@@ -287,6 +262,23 @@ artifacts/experimental-predicate-demo/client/predicate-package.json
 claim verification 中の proxy/attestor です。
 
 signed claim context には `hiddenPredicate` が含まれます。raw hidden age value は含まれません。
+
+改ざん確認をしたい場合は、観測 response file はそのままにして、別の predicate input file を渡します。
+
+```bash
+NODE_ENV=test npm run demo:predicate:client -- \
+  --demo age \
+  --fixture-url https://localhost:9443/profile \
+  --attestor-url ws://127.0.0.1:8001/ws \
+  --observed-response-file artifacts/experimental-predicate-demo/client/client-observed-profile.json \
+  --predicate-input-file artifacts/experimental-predicate-demo/client/tampered-profile.json \
+  --out-dir artifacts/experimental-predicate-demo/client
+```
+
+git 管理している `tampered-profile.json` は Alice の age を `99` に変えています。これは
+`age >= 20` を満たすため client 側の proof generation は成功しますが、predicate proof が
+Reclaim transcript 経由で観測された TOPRF hidden value と一致しなくなるため、attestor が拒否します。
+predicate input の `"age"` を `15` に変えると、client 側の proof generation が先に失敗します。
 
 #### 4. Third-Party Verifier
 
@@ -336,23 +328,14 @@ NODE_ENV=test npm run demo:predicate:fixture -- \
 ```
 
 Demo 1 の attestor がまだ起動している場合は、そのまま再利用できます。attestor は起動時に
-両方の demo verifier を登録します。次に fixture body を fetch します。
-
-```bash
-NODE_ENV=test npm run demo:predicate:fetch -- \
-  --demo income \
-  --fixture-url https://localhost:9443/income \
-  --out-file artifacts/experimental-predicate-demo/client/client-observed-income.json
-```
-
-client/prover を実行します。
+両方の demo verifier を登録します。次に client/prover を実行します。
 
 ```bash
 NODE_ENV=test npm run demo:predicate:client -- \
   --demo income \
   --fixture-url https://localhost:9443/income \
   --attestor-url ws://127.0.0.1:8001/ws \
-  --profile-file artifacts/experimental-predicate-demo/client/client-observed-income.json \
+  --observed-response-file artifacts/experimental-predicate-demo/client/client-observed-income.json \
   --package-file artifacts/experimental-predicate-demo/client/predicate-package-income.json \
   --out-dir artifacts/experimental-predicate-demo/client
 ```
@@ -364,14 +347,14 @@ NODE_ENV=test npm run demo:predicate:verify -- \
   --package artifacts/experimental-predicate-demo/client/predicate-package-income.json
 ```
 
-改ざん確認をしたい場合は、client/prover を実行する前に `client-observed-income.json` を
-編集します。`annualIncome` を `40000` に変えると、client 側の proof generation が失敗します。
-`90000` など predicate を満たす別の値に変えると、predicate proof が Reclaim transcript 経由で
-観測された TOPRF hidden value と一致しなくなるため、後続の attestor binding が失敗します。
+改ざん確認をしたい場合は、別の `--predicate-input-file` を渡します。`annualIncome` を
+`40000` に変えると、client 側の proof generation が失敗します。`90000` など predicate を
+満たす別の値に変えると、predicate proof が Reclaim transcript 経由で観測された TOPRF hidden
+value と一致しなくなるため、後続の attestor binding が失敗します。
 
 ### 別の Predicate Demo を追加する方法
 
-別の demo を追加するには、新しい verifier challenge を定義し、同じ 4 role の流れに接続します。
+別の demo を追加するには、新しい verifier challenge を定義し、同じ role command の流れに接続します。
 
 1. `src/scripts/experimental-predicate-demo-utils.ts` に challenge/template を定義する:
    template id、endpoint、response selector、predicate kind と parameter、proof system、
@@ -421,7 +404,6 @@ balance: {
 
 ```bash
 NODE_ENV=test npm run demo:predicate:fixture -- --demo balance
-NODE_ENV=test npm run demo:predicate:fetch -- --demo balance
 NODE_ENV=test npm run demo:predicate:client -- --demo balance
 NODE_ENV=test npm run demo:predicate:verify -- --package artifacts/experimental-predicate-demo/client/predicate-package-balance.json
 ```
