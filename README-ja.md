@@ -581,6 +581,12 @@ npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
 
 ## ビルドに関する付記
 
-上記の Node 22 確認環境では、この実験向けの targeted tests と `npm run build` が通っています。
+上記の Node 22 確認環境では、この実験向けの targeted tests は通っています。
 別の Node version で native `re2` module を install していた場合は、tests を実行する前に
 `npm rebuild re2` で rebuild してください。
+
+`npm run build` は現在、AVS / typechain 生成 contract layer で失敗します。
+代表的には `ReclaimServiceManager.getAddress()` が型上存在しない error や、生成 factory の
+`override` type error です。この失敗は fork 元の
+`reclaimprotocol/attestor-core` の `upstream/main` でも同じように再現します。つまり、この fork の
+predicate proof 変更に由来するものではなく、fork baseline から継承している既知の build failure です。

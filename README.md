@@ -610,6 +610,12 @@ npm run run:test-files -- --test src/tests/http-provider-utils.test.ts
 
 ## Build Note
 
-Targeted tests and `npm run build` pass in the verified Node 22 environment
-above. If the native `re2` module was installed under another Node version,
-rebuild it with `npm rebuild re2` before running the tests.
+The targeted tests above pass in the verified Node 22 environment. If the
+native `re2` module was installed under another Node version, rebuild it with
+`npm rebuild re2` before running the tests.
+
+`npm run build` currently fails in the AVS/typechain-generated contract layer
+with errors such as missing `ReclaimServiceManager.getAddress()` and generated
+factory `override` type errors. The same failure reproduces on
+`upstream/main` from `reclaimprotocol/attestor-core`; it is inherited from the
+fork baseline and is not caused by this branch's predicate-proof changes.
